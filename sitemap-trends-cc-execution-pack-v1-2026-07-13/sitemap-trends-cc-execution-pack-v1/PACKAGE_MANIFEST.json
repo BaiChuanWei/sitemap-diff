@@ -1,0 +1,148 @@
+{
+  "package": "sitemap-trends-cc-execution-pack",
+  "version": "1.0",
+  "created_at": "2026-07-13",
+  "language": "zh-CN",
+  "files": [
+    {
+      "path": "CHANGELOG.md",
+      "sha256": "2ac18e4f5cd8fae1d3fd24e7045c7cfb315ce8eeb256e7ba502b678274780b76",
+      "size": 257
+    },
+    {
+      "path": "LICENSE_NOTICE.md",
+      "sha256": "6e1d368e34bf73f7bbc2776915c8712efcde2b5ef4b9dd0f292c708efe2f0ae4",
+      "size": 433
+    },
+    {
+      "path": "START_HERE.md",
+      "sha256": "cd05539c36a668b3027c8bb6d3b0d54a9a085c327b121fb7d2fef7d67d553231",
+      "size": 2001
+    },
+    {
+      "path": "docs/00_PROJECT_BRIEF.md",
+      "sha256": "65461122463d361a7a33e5809aa2d100913af852e1551611e7d0fe1c679fc28b",
+      "size": 1400
+    },
+    {
+      "path": "docs/01_FIRST_PRINCIPLES.md",
+      "sha256": "d0d335ecea076f7fbf274e4f13adde1d089116dda75780bf726d6ac21a6a1dc1",
+      "size": 1841
+    },
+    {
+      "path": "docs/02_SCOPE_AND_PRIORITIES.md",
+      "sha256": "ecd99cbe81f32ea68041698c7dc67450959e5ae80f5b93dbfcc8c85af57a59f0",
+      "size": 1822
+    },
+    {
+      "path": "docs/03_REFERENCE_SOURCES.md",
+      "sha256": "d585e5bb935a58783476bbc736348a41257c37f80409d6f6315fad65477e1339",
+      "size": 1220
+    },
+    {
+      "path": "docs/04_TARGET_ARCHITECTURE.md",
+      "sha256": "f6247fb31586202a0adf73b3668aa9e810aaccdd413c087dffac9361bd6bfecb",
+      "size": 1267
+    },
+    {
+      "path": "docs/05_DATA_MODEL.md",
+      "sha256": "af20fa482dafd4e576316542e6136a0268aeb8557f47137552dc6f2170f5634a",
+      "size": 1958
+    },
+    {
+      "path": "docs/06_MILESTONES.md",
+      "sha256": "c4fe8ac08c4279d02b61dd3fc352f1d9142ac65170af8f83bab15e4602c03e85",
+      "size": 1700
+    },
+    {
+      "path": "docs/07_ACCEPTANCE_TESTS.md",
+      "sha256": "ddc125ffa51563320b3484bd10aba0bd7f3026760d2df957eb073756f5316e86",
+      "size": 1896
+    },
+    {
+      "path": "docs/08_CC_WEB_MULTI_AGENT_WORKFLOW.md",
+      "sha256": "87e33b59e2827e7f9b7b1fd5c762bbf515d3488cabc891911187b9edf72856cf",
+      "size": 1328
+    },
+    {
+      "path": "docs/09_MANAGER_CHECKLIST.md",
+      "sha256": "12c7ee20f5c132e416e93f803b2d38aab17e58ae4dd01b66b1ca91c3a9dabd20",
+      "size": 1093
+    },
+    {
+      "path": "docs/10_SAFETY_AND_ROLLBACK.md",
+      "sha256": "db4c0b309051d3250b147d494e48432841e39012c6139e1bd7e868460079abb3",
+      "size": 1014
+    },
+    {
+      "path": "prompts/00_context_alignment_prompt.md",
+      "sha256": "d6e27063e508bc11fa1f4a6fe7107b481d196f24ac711371f36bc501ee950239",
+      "size": 1900
+    },
+    {
+      "path": "prompts/01_read_only_audit_prompt.md",
+      "sha256": "ffcc83f5d33691a0204a021cadd868f539ef8fbe04f1aa7a9dd402391c3a98b2",
+      "size": 972
+    },
+    {
+      "path": "prompts/02_milestone_1_repo_baseline.md",
+      "sha256": "0b466ffa50a9c8fa0c9206f378db2737ae5772f25f17c8fef96b2c617bbaca69",
+      "size": 940
+    },
+    {
+      "path": "prompts/03_milestone_2_database_v3.md",
+      "sha256": "df91d446c8adf1a01a94ae576c7f7ecbd802ae08016770f44a9ebfa8974ef8b7",
+      "size": 855
+    },
+    {
+      "path": "prompts/04_milestone_3_sitemap_pipeline.md",
+      "sha256": "efceb65e803af870b681735d48fae75b149eef5cd313d1102369cba82829e351",
+      "size": 754
+    },
+    {
+      "path": "prompts/05_milestone_4_url_events.md",
+      "sha256": "981bbf6eaf6c523d4cddc95865165611ca10b1e5c576ea716e72e553d936b47a",
+      "size": 757
+    },
+    {
+      "path": "prompts/06_milestone_5_game_entities.md",
+      "sha256": "ba233f08e822691a1627a5de2a18513b93d30ec7107ec0906cbe0bce0bb79898",
+      "size": 820
+    },
+    {
+      "path": "prompts/07_milestone_6_dashboard.md",
+      "sha256": "8220f9051a30537759b7b1a27e3e8b00f78b5df70fa6351047b4dc08c7aaa849",
+      "size": 758
+    },
+    {
+      "path": "prompts/08_milestone_7_100_site_validation.md",
+      "sha256": "565a0688cc868cf23b6b92f5ce427c7bc585ed32a0d46c3d638823a45df24179",
+      "size": 745
+    },
+    {
+      "path": "templates/CLAUDE.md",
+      "sha256": "e14da3dfff58f7bac17edb47cb107f90a08816471d2d8be7d6ec1b0a2dd91dfc",
+      "size": 1145
+    },
+    {
+      "path": "templates/milestone_report.md",
+      "sha256": "858d1cdbca7cbc270318ca0ab1855539efddc0c3039123b987eaa728d66a5c8a",
+      "size": 281
+    },
+    {
+      "path": "templates/review_checklist.md",
+      "sha256": "8220debbfcc90348ddb8e56085dbf9ca7e70af2a18787096ec5fbce5afe4a4be",
+      "size": 382
+    },
+    {
+      "path": "templates/seed-sites.csv",
+      "sha256": "6d066b44a416e85f8d757057b7096c07ad15562f8bf8fdf2f4e06378bd333a0c",
+      "size": 395
+    },
+    {
+      "path": "tests/fixtures/README.md",
+      "sha256": "e10c11c636b897cff28247c13dc116a6dd5349a3c31ecee836b64f5ba7ba0805",
+      "size": 597
+    }
+  ]
+}
