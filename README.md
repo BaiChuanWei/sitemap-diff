@@ -18,6 +18,19 @@
 
 采集器只做"这一轮能拿到哪些页面 URL"，**不判断新增、不写正式 SQLite URL 历史**——那是 Milestone 3 的范围。`bin/run.js --inspect-site <site_id>` 或 `--inspect-url <url>` 可以单独跑一次采集检查，结果打印到终端，并写一份调试 JSON 到 `output/debug/`。
 
+### 采集结果完整性与 Milestone 3 准入契约
+
+每次单站采集结果都带有完整性字段：
+
+- `status`：`success` | `partial` | `failed`
+- `complete`：仅当 `status === "success"`（有成功、无失败、无截断）时为 `true`
+- `truncated`：数据是否被主动截断（达到递归深度 / Endpoint 数 / 页面 URL 数上限）
+- `truncationReasons`：截断原因，如 `MAX_PAGE_URLS` / `MAX_SITEMAPS_ENDPOINTS` / `MAX_DEPTH`
+
+任何截断都会把 `success` 降级为 `partial`，杜绝"被截断却标记为完整"的假完整结果（例如 itch.io 触发 50 万页面 URL 上限时会返回 `partial` + `complete=false` + `truncated=true`，而不是 `success`）。
+
+**Milestone 3 强制接口契约**：只有 `status === "success"` 且 `complete === true`（此时 `truncated` 必为 `false`）的采集结果，才允许用于建立或更新正式 baseline / seen URL 历史 / 计算新增 URL。`partial`、`failed`、`complete=false`、`truncated=true` 或页面 URL 数为 0 的结果一律拒绝写入正式 URL 历史，只记录运行错误和诊断信息。该契约的权威定义见 `src/sitemap/collector.js` 的函数注释。
+
 ## 目录结构
 
 ```

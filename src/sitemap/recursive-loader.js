@@ -30,6 +30,9 @@ export async function loadSitemapsRecursively({ entryPoints, limits, fetchImpl }
   const failedSitemaps = [];
   const warnings = [];
   const errors = [];
+  // 记录"数据被主动截断"的原因：任何一个非空都意味着本次采集结果不完整
+  // （complete=false），后续 Milestone 3 不得用这样的结果建立/更新 baseline。
+  const truncationReasons = new Set();
   let sitemapCount = 0;
   let pageUrlLimitWarned = false;
   let sitemapLimitWarned = false;
@@ -62,6 +65,7 @@ export async function loadSitemapsRecursively({ entryPoints, limits, fetchImpl }
     visited.add(normalized);
 
     if (item.depth > effectiveLimits.MAX_RECURSION_DEPTH) {
+      truncationReasons.add('MAX_DEPTH');
       recordFailure(item, {
         status: 'skipped',
         errorCode: 'MAX_DEPTH_EXCEEDED',
@@ -71,6 +75,7 @@ export async function loadSitemapsRecursively({ entryPoints, limits, fetchImpl }
     }
 
     if (sitemapCount >= effectiveLimits.MAX_SITEMAPS_PER_SITE) {
+      truncationReasons.add('MAX_SITEMAPS_ENDPOINTS');
       if (!sitemapLimitWarned) {
         sitemapLimitWarned = true;
         warnings.push(`达到单站最大 Sitemap Endpoint 数限制(${effectiveLimits.MAX_SITEMAPS_PER_SITE})`);
@@ -127,6 +132,7 @@ export async function loadSitemapsRecursively({ entryPoints, limits, fetchImpl }
     if (parsed.type === 'urlset') {
       for (const loc of parsed.locations) {
         if (pageUrls.size >= effectiveLimits.MAX_PAGE_URLS_PER_SITE) {
+          truncationReasons.add('MAX_PAGE_URLS');
           if (!pageUrlLimitWarned) {
             pageUrlLimitWarned = true;
             warnings.push(`达到单站最大页面 URL 数限制(${effectiveLimits.MAX_PAGE_URLS_PER_SITE})`);
@@ -156,10 +162,29 @@ export async function loadSitemapsRecursively({ entryPoints, limits, fetchImpl }
 
   const hasSuccess = processedSitemaps.some((e) => e.status === 'success');
   const hasFailure = failedSitemaps.length > 0;
-  const status = !hasFailure ? 'success' : hasSuccess ? 'partial' : 'failed';
+  const truncated = truncationReasons.size > 0;
+
+  // status/complete 语义（Milestone 2 收尾修正）：
+  //   success + complete=true  仅当：有成功、无失败、无截断——数据可视为完整；
+  //   partial                  有成功，但发生了失败或截断——数据不完整；
+  //   failed                   没有任何成功的 Endpoint。
+  // complete 只在 status===success 时为 true；任何截断都会把 success 降级为 partial，
+  // 从而杜绝"被截断却标记为完整"的假完整结果。
+  let status;
+  if (hasSuccess && !hasFailure && !truncated) {
+    status = 'success';
+  } else if (hasSuccess) {
+    status = 'partial';
+  } else {
+    status = 'failed';
+  }
+  const complete = status === 'success';
 
   return {
     status,
+    complete,
+    truncated,
+    truncationReasons: [...truncationReasons],
     processedSitemaps,
     failedSitemaps,
     pageUrls: [...pageUrls],

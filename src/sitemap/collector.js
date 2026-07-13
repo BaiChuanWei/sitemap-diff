@@ -10,6 +10,19 @@ import { DEFAULT_LIMITS } from './limits.js';
  *   - baseUrl：站点根地址，会走 robots.txt 发现 + 常见路径探测
  *   - manualSitemapUrl：手工指定的 Sitemap URL
  *   - 两者都提供时会合并去重
+ *
+ * 返回结果里的完整性字段：
+ *   - status: "success" | "partial" | "failed"
+ *   - complete: boolean —— 仅当 status==="success" 时为 true
+ *   - truncated: boolean —— 数据是否被主动截断（深度/Endpoint 数/页面 URL 数上限）
+ *   - truncationReasons: string[] —— 截断原因，如 MAX_PAGE_URLS / MAX_SITEMAPS_ENDPOINTS / MAX_DEPTH
+ *
+ * ★ Milestone 3 强制接口契约 ★
+ * 只有 status === "success" 且 complete === true（此时 truncated 必为 false）的采集
+ * 结果，才允许用于建立或更新正式 baseline / seen URL 历史 / 计算新增 URL。
+ * status 为 "partial" / "failed"、complete === false、truncated === true、或页面 URL
+ * 数为 0 的结果一律拒绝写入正式 URL 历史，只能记录运行错误和诊断信息（crawl run）。
+ * 这条契约由本函数的返回结构保证，具体的写入准入判断由 Milestone 3 的存储层实现。
  */
 export async function collectSite({ siteId, domain, baseUrl, manualSitemapUrl, limits, fetchImpl } = {}) {
   const effectiveLimits = limits || DEFAULT_LIMITS;
@@ -23,6 +36,9 @@ export async function collectSite({ siteId, domain, baseUrl, manualSitemapUrl, l
       siteId: siteId ?? null,
       domain: domain ?? null,
       status: 'failed',
+      complete: false,
+      truncated: false,
+      truncationReasons: [],
       startedAt: startedAt.toISOString(),
       finishedAt: finishedAt.toISOString(),
       durationMs: finishedAt - startedAt,
@@ -49,6 +65,9 @@ export async function collectSite({ siteId, domain, baseUrl, manualSitemapUrl, l
     siteId: siteId ?? null,
     domain: domain ?? null,
     status: loadResult.status,
+    complete: loadResult.complete,
+    truncated: loadResult.truncated,
+    truncationReasons: loadResult.truncationReasons,
     startedAt: startedAt.toISOString(),
     finishedAt: finishedAt.toISOString(),
     durationMs: finishedAt - startedAt,

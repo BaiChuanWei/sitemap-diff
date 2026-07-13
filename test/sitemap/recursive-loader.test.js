@@ -32,6 +32,9 @@ test('一层 Index：递归加载两个子 Sitemap，页面 URL 合并且不含�
       limits: fastLimits(),
     });
     assert.equal(result.status, 'success');
+    assert.equal(result.complete, true, '完整成功时 complete 必须为 true');
+    assert.equal(result.truncated, false);
+    assert.deepEqual(result.truncationReasons, []);
     assert.equal(result.sitemapCount, 3);
     assert.equal(result.pageUrlCount, 3);
     assert.deepEqual(
@@ -120,6 +123,9 @@ test('超过最大递归深度：深度之外的 Endpoint 标记为失败，整�
       limits: fastLimits({ MAX_RECURSION_DEPTH: 2 }),
     });
     assert.equal(result.status, 'partial');
+    assert.equal(result.complete, false, '达到最大递归深度时 complete 必须为 false');
+    assert.equal(result.truncated, true);
+    assert.ok(result.truncationReasons.includes('MAX_DEPTH'));
     assert.equal(result.pageUrlCount, 0, 'd3 超过深度限制不应该被抓取');
     const failed = result.failedSitemaps.find((e) => e.url === `${url}/d3.xml`);
     assert.ok(failed, 'd3 应该出现在 failedSitemaps 里');
@@ -147,9 +153,38 @@ test('超过单站最大 Sitemap Endpoint 数：超出部分被跳过而不是�
       entryPoints: [{ url: `${url}/index.xml` }],
       limits: fastLimits({ MAX_SITEMAPS_PER_SITE: 2 }),
     });
+    assert.equal(result.status, 'partial', '达到 Endpoint 上限属于截断，整体状态应为 partial');
+    assert.equal(result.complete, false, '达到 Endpoint 上限时 complete 必须为 false');
+    assert.equal(result.truncated, true);
+    assert.ok(result.truncationReasons.includes('MAX_SITEMAPS_ENDPOINTS'));
     assert.equal(result.sitemapCount, 2, '只应该处理 index + 1 个 child，达到上限就停止');
     assert.equal(result.pageUrlCount, 1);
     assert.ok(result.warnings.some((w) => /最大 Sitemap Endpoint/.test(w)));
+  } finally {
+    await close();
+  }
+});
+
+test('超过单站最大页面 URL 数：主动截断，status=partial / complete=false / truncated=true', async () => {
+  const base = makeBaseHolder();
+  const { url, close } = await startTestServer(
+    createRouter({
+      '/index.xml': () => ({ body: indexXml([`${base.url}/child.xml`]) }),
+      '/child.xml': () => ({ body: urlsetXml([`${base.url}/g/a`, `${base.url}/g/b`, `${base.url}/g/c`]) }),
+    }),
+  );
+  base.url = url;
+  try {
+    const result = await loadSitemapsRecursively({
+      entryPoints: [{ url: `${url}/index.xml` }],
+      limits: fastLimits({ MAX_PAGE_URLS_PER_SITE: 2 }),
+    });
+    assert.equal(result.status, 'partial');
+    assert.equal(result.complete, false, '页面 URL 被截断时 complete 必须为 false');
+    assert.equal(result.truncated, true);
+    assert.ok(result.truncationReasons.includes('MAX_PAGE_URLS'));
+    assert.equal(result.pageUrlCount, 2, '页面 URL 应该被截断在上限值');
+    assert.ok(result.warnings.some((w) => /最大页面 URL/.test(w)));
   } finally {
     await close();
   }
@@ -170,6 +205,8 @@ test('子 Sitemap 部分失败：一个成功一个 404，整体状态为 partia
       limits: fastLimits(),
     });
     assert.equal(result.status, 'partial');
+    assert.equal(result.complete, false, '子 Sitemap 失败时 complete 必须为 false');
+    assert.equal(result.truncated, false, '子 Sitemap 失败属于失败而非截断，truncated 应为 false');
     assert.deepEqual(result.pageUrls, [`${url}/g/survivor`]);
     const failed = result.failedSitemaps.find((e) => e.url === `${url}/bad.xml`);
     assert.ok(failed);
