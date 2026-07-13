@@ -1,7 +1,7 @@
 {
   "name": "sitemap-trends-local",
   "version": "0.1.0",
-  "description": "本地 Windows 生产工具：监控约 100 个游戏站点的新增游戏 URL（Milestone 1 基线，详见 CURRENT_GOAL.md）",
+  "description": "本地 Windows 生产工具：监控约 100 个游戏站点的新增游戏 URL（Milestone 2 Sitemap 采集器，详见 CURRENT_GOAL.md）",
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -11,7 +11,9 @@
     "test": "node --test"
   },
   "dependencies": {
-    "better-sqlite3": "^11.3.0"
+    "better-sqlite3": "^11.3.0",
+    "fast-xml-parser": "^5.10.0",
+    "p-limit": "^7.3.0"
   },
   "keywords": [
     "sitemap",

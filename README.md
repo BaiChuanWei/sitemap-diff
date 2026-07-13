@@ -12,27 +12,37 @@
 
 历史上项目经历过两次云端方向的实现（Cloudflare Workers + Discord/Telegram Bot，以及 GitHub Actions + Supabase + Vercel/Next.js），均已归档到 `legacy/`，不在当前实现范围内，但保留供未来参考。
 
-## 当前状态：Milestone 1（本地项目基线）
+## 当前状态：Milestone 2（Sitemap 采集器）
 
-按 `CLAUDE.md` 定义的 5 个 Milestone，当前完成到 Milestone 1：确认本地入口、建立 SQLite 存储框架、建立本地配置（站点清单）、建立测试框架和 fixture 基线、归档遗留云端代码。
+按 `CLAUDE.md` 定义的 5 个 Milestone，当前完成到 Milestone 2：在 Milestone 1 的基线之上，实现了一个独立、可测试的 Sitemap 采集器（`src/sitemap/`）——robots.txt 自动发现、Sitemap Index 多层递归、XML/XML.GZ、请求超时与重试、有限并发，全部使用真实 XML 解析（`fast-xml-parser`），不再依赖正则猜测。
 
-**Milestone 2（Sitemap 采集器：robots 发现、Sitemap Index 递归、XML/GZ、超时重试、有限并发）尚未实现**，`bin/run.js` 目前只做"加载配置 → 初始化 SQLite → 同步站点清单"，不抓取任何站点。
+采集器只做"这一轮能拿到哪些页面 URL"，**不判断新增、不写正式 SQLite URL 历史**——那是 Milestone 3 的范围。`bin/run.js --inspect-site <site_id>` 或 `--inspect-url <url>` 可以单独跑一次采集检查，结果打印到终端，并写一份调试 JSON 到 `output/debug/`。
 
 ## 目录结构
 
 ```
 CURRENT_GOAL.md         # 当前目标，最高优先级
 CLAUDE.md                # 开发规则与 5 个 Milestone
-bin/run.js               # 本地入口（Milestone 1 骨架）
+bin/run.js               # 本地入口：默认基线同步 + --inspect-site/--inspect-url 采集检查
 src/
   config.js              # 本地配置加载 + 站点清单 CSV 解析
   db/
     index.js             # SQLite 连接 + 迁移执行器
     migrations/           # 编号 up/down 迁移
+  sitemap/
+    fetcher.js            # HTTP 请求：超时、重试、429/5xx 退避、重定向上限、大小上限、Gzip 检测解压
+    parser.js              # 正式 XML 解析（fast-xml-parser）：urlset/sitemapindex、命名空间、CDATA、实体
+    discovery.js            # robots.txt 发现 + 手工 sitemap_url + 常见路径探测
+    recursive-loader.js      # Sitemap Index 递归：visited set、深度/数量上限、有限并发
+    collector.js             # 站点级编排：discovery + recursive-loader → 结构化结果
+    limits.js                # 集中的默认限制（超时/重试/并发/递归深度/数量上限）
+    errors.js                 # 统一错误类型和错误码
 config/
   sites.example.csv       # 站点清单模板（真实约 100 站清单待补）
 test/
   *.test.js               # node:test 单元测试
+  sitemap/                # Sitemap 采集器测试（解析器/抓取器/发现/递归/端到端）
+  helpers/                 # 测试用本地 HTTP Server
   fixtures/                # Sitemap 测试样本（含真实 gzip 文件）
 docs/
   audit/                  # 只读审计报告存档
@@ -46,15 +56,17 @@ legacy/
 
 ```bash
 npm install
-npm test        # node --test，跑 test/ 下全部单元测试
-npm start        # 运行本地入口（bin/run.js）
+npm test                                    # node --test，跑 test/ 下全部单元测试
+npm start                                    # 运行本地入口（bin/run.js），只做配置/SQLite 基线同步
+node bin/run.js --inspect-site poki          # 只做 Sitemap 采集检查，不写正式 URL 历史
+node bin/run.js --inspect-url https://example.com/sitemap.xml
 ```
 
 ## 本地配置
 
 - 站点清单：`config/sites.example.csv`（字段：`site_id,domain,priority,enabled,robots_url,sitemap_url,expected_game_path,notes`），目前只有模板示例行，正式使用前需要替换成约 100 个真实站点
 - SQLite 数据库：默认 `data/local.db`（首次运行自动创建，已在 `.gitignore` 中排除，不提交到仓库）
-- 报告输出：默认 `output/`（Milestone 4 才会开始写入，已在 `.gitignore` 中排除）
+- 报告输出：默认 `output/`（Milestone 4 才会开始写入正式日报，已在 `.gitignore` 中排除）；`--inspect-site`/`--inspect-url` 的调试结果会写到 `output/debug/`，与正式日报目录分开
 
 ## 后续 Milestone
 

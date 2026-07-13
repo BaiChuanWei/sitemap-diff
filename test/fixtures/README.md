@@ -1,9 +1,12 @@
 # 测试 Fixture 清单
 
-Milestone 1 建立的 fixture 基线，供 Milestone 2（Sitemap 采集器）和 Milestone 3（基线/新增 URL）开发时使用。这些文件目前只是静态测试数据，本阶段没有对应的解析/递归逻辑去正确处理其中大部分场景（那是 M2/M3 的范围）——`test/fixtures.test.js` 只验证这些文件本身的完整性（存在、非空、基本格式特征），不测试尚不存在的业务逻辑。
+Milestone 1 建立的 fixture 基线，供 Milestone 2（Sitemap 采集器）和 Milestone 3（基线/新增 URL）开发时使用。`test/fixtures.test.js` 只验证这些文件本身的完整性（存在、非空、基本格式特征）。Milestone 2 新增了 3 个专门给 `src/sitemap/parser.js` 单元测试用的 fixture（见下表前三行），其余延续 Milestone 1 原样复用，`test/sitemap/*.test.js` 会真正解析/递归它们。
 
 | 文件 | 用途 |
 |---|---|
+| `urlset-basic.xml` | Milestone 2：最基础的 urlset，2 个 URL，parser.js 单元测试用 |
+| `urlset-namespace.xml` | Milestone 2：urlset 用命名空间前缀（`s:urlset`/`s:loc`），并含 `image:image/image:loc` 扩展元素，验证不会把图片 loc 误当页面 URL，同时含 `&amp;` 实体 |
+| `urlset-cdata.xml` | Milestone 2：`<loc>` 用 `<![CDATA[...]]>` 包裹 URL |
 | `urlset-old.xml` | 普通 urlset，3 个 URL，作为"旧版本" |
 | `urlset-new.xml` | 同上 + 1 个新 URL（4 个），作为"新版本"，用于 M3 baseline/added 测试 |
 | `sitemap-index.xml` | Sitemap Index，指向 `child-games-1.xml`、`child-games-2.xml` 两个子 sitemap |
