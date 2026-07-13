@@ -1,25 +1,23 @@
 {
-  "name": "sitemap-diff",
-  "version": "2.0.0",
-  "description": "Sitemap monitoring bot - GitHub Actions + Vercel version",
+  "name": "sitemap-trends-local",
+  "version": "0.1.0",
+  "description": "本地 Windows 生产工具：监控约 100 个游戏站点的新增游戏 URL（Milestone 1 基线，详见 CURRENT_GOAL.md）",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "check": "node lib/check-sitemaps.js",
-    "dev": "vercel dev",
-    "deploy": "vercel deploy --prod"
+    "start": "node bin/run.js",
+    "test": "node --test"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.39.0"
-  },
-  "devDependencies": {
-    "vercel": "^33.0.0"
+    "better-sqlite3": "^11.3.0"
   },
   "keywords": [
     "sitemap",
     "monitoring",
-    "discord",
-    "telegram",
-    "bot"
+    "local",
+    "sqlite"
   ],
   "author": "yangjia",
   "license": "MIT"

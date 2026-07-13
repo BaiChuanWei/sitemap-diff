@@ -1,0 +1,4 @@
+site_id,domain,priority,enabled,robots_url,sitemap_url,expected_game_path,notes
+poki,poki.com,high,true,https://poki.com/robots.txt,,/g/,示例行，正式使用前核对
+crazygames,crazygames.com,high,true,https://www.crazygames.com/robots.txt,,/game/,示例行，正式使用前核对
+example_games,example.com,medium,false,,https://example.com/sitemap.xml,/games/,模板示例，必须替换
