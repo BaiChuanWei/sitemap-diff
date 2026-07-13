@@ -24,6 +24,7 @@ export function loadLocalConfig(overrides = {}) {
     dbPath: overrides.dbPath || resolve(projectRoot, 'data', 'local.db'),
     sitesCsvPath: overrides.sitesCsvPath || resolve(projectRoot, 'config', 'sites.example.csv'),
     outputDir: overrides.outputDir || resolve(projectRoot, 'output'),
+    lockPath: overrides.lockPath || resolve(projectRoot, 'data', 'collector.lock'),
   };
 }
 
