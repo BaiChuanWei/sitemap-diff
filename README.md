@@ -1,397 +1,106 @@
-# Site Bot - 网站监控机器人
+# Sitemap Diff — 游戏 Sitemap 监控
 
-一个基于 Cloudflare Workers 的智能网站监控机器人，自动监控多个网站的 sitemap 变化，并通过 Telegram/Discord 推送更新通知。
+监控多个网站的 sitemap，检测新增游戏页面，追踪同一款游戏在不同独立域名上的分布。提供 Web Dashboard 进行浏览和管理。
 
-## 🎯 项目特色
+> 本项目基于 [Yangjia23/sitemap-diff](https://github.com/Yangjia23/sitemap-diff)（MIT License）二次开发，见 [LICENSE](./LICENSE)。
 
-- **零成本部署**：基于 Cloudflare Workers，完全免费
-- **智能监控**：自动检测 sitemap 变化，支持 .gz 压缩文件
-- **静默模式**：只在有更新时发送通知，避免消息轰炸
-- **多平台支持**：Telegram 和 Discord 双平台
-- **关键词汇总**：自动提取和分析新增内容关键词
-- **实时交互**：支持命令行操作和状态查询
-
----
-
-## 📋 第一部分：业务逻辑与功能
-
-### 🔍 核心功能
-
-#### 1. 自动监控
-- **定时检查**：每小时自动检查所有配置的 sitemap
-- **变化检测**：对比新旧 sitemap，识别新增的 URL
-- **智能解析**：支持 XML 和 HTML 格式的 sitemap
-- **压缩支持**：自动处理 .gz 压缩的 sitemap 文件
-
-#### 2. 消息推送策略
-
-**静默模式设计**：
-- ✅ **有更新**：发送完整的更新通知
-- 🔇 **无更新**：完全静默，不发送任何消息
-- 📊 **汇总报告**：所有更新完成后发送关键词汇总
-
-**消息类型**：
-1. **更新通知**：包含域名、新增数量、sitemap 文件、URL 列表
-2. **关键词汇总**：分析新增内容的主题关键词
-3. **命令响应**：用户交互的反馈信息
-4. **错误通知**：配置错误或网络问题的提示
-
-#### 3. 支持的命令
-
-**Telegram 命令**：
-```
-/start, /help     - 显示帮助信息
-/rss list         - 显示所有监控的 sitemap
-/rss add URL      - 添加 sitemap 监控
-/rss del URL      - 删除 sitemap 监控
-/news             - 手动触发关键词汇总
-```
-
-**Discord 命令**：
-```
-/rss list         - 显示所有监控的 sitemap
-/rss add URL      - 添加 sitemap 监控
-/rss del URL      - 删除 sitemap 监控
-/news             - 手动触发关键词汇总
-```
-
-#### 4. API 接口
-
-**健康检查**：
-```
-GET /health
-```
-
-**手动触发监控**：
-```
-POST /monitor
-```
-
-**API 状态查询**：
-```
-GET /api/status
-```
-
-**Webhook 端点**：
-```
-POST /webhook/telegram  - Telegram Webhook
-POST /webhook/discord   - Discord Webhook
-```
-
-### 🏗️ 系统架构
+## 架构（V2，当前生产实际使用的架构）
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Cloudflare    │    │   Telegram      │    │   Discord       │
-│   Workers       │◄──►│   Bot API       │    │   Bot API       │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │
-         ▼
-┌─────────────────┐
-│   Cloudflare    │
-│   KV Storage    │
-└─────────────────┘
+┌─────────────────────┐     ┌─────────────────┐
+│  GitHub Actions      │────▶│  Supabase        │
+│  每 4 小时定时检查    │     │  Postgres 数据存储│
+└─────────────────────┘     └────────┬─────────┘
+                                      │
+┌─────────────────────┐              │
+│  Web Dashboard        │◀────────────┘
+│  (Vercel + Next.js)   │
+│  - 游戏浏览            │
+│  - Sitemap 管理        │
+│  - 统计面板            │
+└─────────────────────┘
 ```
 
-**核心组件**：
-- **RSSManager**：sitemap 下载、解析、存储管理
-- **TelegramBot**：Telegram 消息发送和命令处理
-- **DiscordBot**：Discord 消息发送和命令处理
-- **Config**：环境变量配置管理
+- **抓取**：GitHub Actions（`.github/workflows/check-sitemaps.yml`）定时触发 `lib/check-sitemaps.js`，对比每个域名 sitemap 的前后版本，只处理新增 URL，识别其中的游戏页面并写入 Supabase。
+- **存储**：Supabase Postgres，表结构见 `supabase/migrations/`（历史散装脚本归档于 `supabase/legacy/`，不再使用）。
+- **展示**：`web/` 是 Next.js Dashboard，部署在 Vercel，浏览器端只读访问 Supabase（`NEXT_PUBLIC_SUPABASE_ANON_KEY`），写操作（增/删 sitemap）经服务端 API route 用 service role key 执行，详见下方「安全模型」。
 
----
+> ⚠️ 仓库里另有一套已废弃的 V1 实现（Cloudflare Workers + Discord/Telegram Bot 通知），已整体移到 [`legacy/v1-cloudflare-workers/`](./legacy/v1-cloudflare-workers/)，当前生产链路不使用，仅作历史存档。
 
-## 🚀 第二部分：快速上手指南
+## 目录结构
 
-### 📋 前置要求
+```
+sitemap-diff/
+├── lib/                          # 爬虫核心库
+│   ├── supabase.js               # Supabase 服务端客户端（service role key）
+│   ├── rss-manager.js            # sitemap 下载/对比/游戏名提取
+│   ├── check-sitemaps.js         # GitHub Actions 定时入口
+│   └── load-env.js               # 本地开发环境变量加载
+├── web/                           # Web Dashboard (Next.js)
+│   ├── src/
+│   │   ├── components/           # React 组件
+│   │   ├── pages/                # 页面 + pages/api（服务端写入入口）
+│   │   ├── lib/                  # supabase.ts（只读，anon）/ supabase-admin.ts（写入，service role，仅服务端）
+│   │   └── styles/
+│   └── package.json
+├── supabase/
+│   ├── migrations/                # 编号 up/down 迁移，当前 schema 的唯一权威来源
+│   └── legacy/                    # 历史散装 SQL 脚本，已归档不再使用
+├── legacy/v1-cloudflare-workers/  # 已废弃的 V1 实现，仅存档
+├── .github/workflows/
+│   └── check-sitemaps.yml
+├── vercel.json
+└── package.json                   # 爬虫依赖（Node 20 + @supabase/supabase-js）
+```
 
-1. **Cloudflare 账户**
-   - 注册 [Cloudflare](https://cloudflare.com) 账户
-   - 验证邮箱地址
+## 安全模型
 
-2. **Node.js 环境**
-   - 安装 Node.js 16+ 版本
-   - 安装 npm 或 yarn
+- 五张业务表（`feeds/sitemaps/games/game_sources/update_logs`）开启 RLS：**anon 角色只读**，写操作仅限 **service_role**（见 `supabase/migrations/0001_tighten_rls_to_service_role.up.sql`）。
+- 浏览器端 Dashboard 只使用公开的 `NEXT_PUBLIC_SUPABASE_ANON_KEY` 读数据；「增/删 sitemap」这类写操作经由 `web/src/pages/api/feeds.ts` 服务端 API route，用只在服务端可见的 `SUPABASE_SERVICE_KEY` 执行，浏览器端拿不到这个密钥。
+- GitHub Actions 用 `SUPABASE_SERVICE_KEY`（存于仓库 Secrets）执行爬虫写入。
 
-3. **Bot Token**
-   - Telegram Bot Token (从 @BotFather 获取)
-   - Discord Bot Token (可选，从 Discord Developer Portal 获取)
+## 环境变量
 
-### 🔧 快速部署
+### GitHub Actions Secrets（爬虫）
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_KEY`
 
-#### 步骤 1: 安装 Wrangler CLI
+### Vercel 环境变量（Web Dashboard）
+- `NEXT_PUBLIC_SUPABASE_URL` — 公开
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY` — 公开，仅只读权限
+- `SUPABASE_SERVICE_KEY` — **服务端专用，不要加 `NEXT_PUBLIC_` 前缀**，只配置在 Vercel 的服务端环境变量里
 
+## 部署步骤
+
+### 1. Supabase
+1. 新建 Supabase 项目
+2. 在 SQL Editor 依次执行 `supabase/migrations/` 下的迁移（细节和顺序见该目录的 `README.md`；对已有生产项目**不要**执行 `0000_baseline_v2_schema`，只需执行后续增量迁移）
+
+### 2. Web Dashboard（Vercel）
 ```bash
-npm install -g wrangler
-```
-
-#### 步骤 2: 登录 Cloudflare
-
-```bash
-wrangler login
-```
-
-#### 步骤 3: 安装项目依赖
-
-```bash
+cd web
 npm install
+npm run build
 ```
+在 Vercel 项目设置中配置上述环境变量，然后部署。
 
-#### 步骤 4: 创建 KV 命名空间
+### 3. GitHub Actions
+在仓库 Settings → Secrets 添加 `SUPABASE_URL`、`SUPABASE_SERVICE_KEY`，`.github/workflows/check-sitemaps.yml` 会按 cron（每 4 小时）自动运行，也可以手动 `workflow_dispatch` 触发。
+
+## 开发命令
 
 ```bash
-# 创建 KV 命名空间
-wrangler kv namespace create SITEMAP_STORAGE
+# 爬虫：本地运行一次 sitemap 检查
+npm run check
 
-# 创建预览环境的命名空间
-wrangler kv namespace create SITEMAP_STORAGE --preview
+# Web Dashboard
+cd web
+npm install
+npm run dev      # http://localhost:3000
+npm run build
+npm start
 ```
 
-#### 步骤 5: 更新配置文件
+## 已知限制（详见项目审计记录）
 
-将得到的 ID 更新到 `wrangler.toml` 文件中：
-
-```toml
-[[kv_namespaces]]
-binding = "SITEMAP_STORAGE"
-id = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"  # 替换为实际的 ID
-preview_id = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"  # 预览环境 ID
-```
-
-#### 步骤 6: 设置环境变量
-
-```bash
-# 设置 Telegram Bot Token
-wrangler secret put TELEGRAM_BOT_TOKEN
-# 输入你的 Telegram Bot Token
-
-# 设置目标聊天 ID
-wrangler secret put TELEGRAM_TARGET_CHAT
-# 输入频道用户名（如 @mychannel）或用户 ID
-
-# 设置 Discord Token (可选)
-wrangler secret put DISCORD_TOKEN
-# 输入你的 Discord Bot Token
-```
-
-**获取 TELEGRAM_TARGET_CHAT 的方法**：
-
-1. **频道用户名**：直接使用频道用户名，如 `@mychannel`
-2. **用户 ID**：使用 @userinfobot 获取你的用户 ID
-3. **频道 ID**：将机器人添加到频道，使用 @userinfobot 获取频道 ID
-
-**获取 Bot Token 的方法**：
-1. 在 Telegram 中找到 @BotFather
-2. 发送 `/newbot` 命令
-3. 按提示设置机器人名称和用户名
-4. 获得 Token，格式如：`123456789:ABCdefGHIjklMNOpqrsTUVwxyz`
-
-#### 步骤 7: 配置 Webhook
-
-**Telegram Webhook 设置**：
-
-方法一：浏览器访问（推荐）
-```
-https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook?url=https://site-bot.your-subdomain.workers.dev/webhook/telegram
-```
-将 `<YOUR_BOT_TOKEN>` 替换为你的实际 Bot Token，`your-subdomain` 替换为你的 Workers 子域名。
-
-方法二：curl 命令
-```bash
-curl -X POST "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook" \
-     -H "Content-Type: application/json" \
-     -d '{"url": "https://site-bot.your-subdomain.workers.dev/webhook/telegram"}'
-```
-
-**Discord Webhook 设置**：
-在 Discord Developer Portal 中设置交互端点：
-```
-https://site-bot.your-subdomain.workers.dev/webhook/discord
-```
-
-#### 步骤 8: 部署到 Cloudflare
-
-```bash
-# 开发环境测试
-npm run dev
-
-# 生产环境部署
-npm run deploy
-```
-
-### 🔧 本地开发配置
-
-#### 创建本地环境变量文件
-
-在项目根目录创建 `.dev.vars` 文件（用于本地开发）：
-
-```bash
-# 创建 .dev.vars 文件
-touch .dev.vars
-```
-
-编辑 `.dev.vars` 文件，添加以下内容：
-
-```env
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
-TELEGRAM_TARGET_CHAT=@your_channel_or_user_id
-DISCORD_TOKEN=your_discord_token_here
-```
-
-**注意**：`.dev.vars` 文件已添加到 `.gitignore`，不会被提交到版本控制。
-
-#### 本地开发测试
-
-```bash
-# 启动本地开发服务器
-npm run dev
-
-# 测试健康检查
-curl http://localhost:8787/health
-
-# 测试手动触发监控
-curl -X POST http://localhost:8787/monitor
-```
-
-### 🔄 修改和更新
-
-#### 修改业务逻辑
-
-**添加新的消息类型**：
-1. 编辑 `src/apps/telegram-bot.js` 或 `src/apps/discord-bot.js`
-2. 添加新的消息发送函数
-3. 在相应位置调用新函数
-
-**修改监控策略**：
-1. 编辑 `src/services/rss-manager.js`
-2. 修改 `downloadSitemap` 函数的解析逻辑
-3. 调整 `addFeed` 函数的处理流程
-
-**添加新的命令**：
-1. 在 `src/apps/telegram-bot.js` 的 `handleTelegramUpdate` 函数中添加新的 case
-2. 实现对应的处理函数
-3. 更新帮助信息
-
-#### 更新部署
-
-```bash
-# 拉取最新代码
-git pull
-
-# 重新部署
-npm run deploy
-```
-
-#### 环境变量更新
-
-```bash
-# 更新特定变量
-wrangler secret put TELEGRAM_BOT_TOKEN
-
-# 删除变量
-wrangler secret delete TELEGRAM_BOT_TOKEN
-```
-
-### 📊 监控和调试
-
-#### 查看实时日志
-
-```bash
-wrangler tail
-```
-
-#### 健康检查
-
-访问你的 Worker URL + `/health`：
-```
-https://site-bot.your-subdomain.workers.dev/health
-```
-
-#### API 状态
-
-访问 `/api/status` 查看运行状态：
-```
-https://site-bot.your-subdomain.workers.dev/api/status
-```
-
-### 🔍 故障排除
-
-#### 常见错误
-
-1. **"Initialization Failed"**
-   - 检查环境变量是否正确设置
-   - 确认 KV 命名空间 ID 是否正确
-
-2. **"配置验证失败"**
-   - 确保 `TELEGRAM_BOT_TOKEN` 和 `TELEGRAM_TARGET_CHAT` 已设置
-   - 检查 Token 格式是否正确
-
-3. **"KV 存储错误"**
-   - 确认 KV 命名空间已创建
-   - 检查 `wrangler.toml` 中的 ID 是否正确
-
-4. **"定时任务不执行"**
-   - 检查 cron 表达式：`"0 * * * *"` (每小时执行)
-   - 确认 Workers 已正确部署
-
-#### 调试步骤
-
-1. **检查配置**
-   ```bash
-   wrangler whoami
-   wrangler kv:namespace list
-   ```
-
-2. **本地测试**
-   ```bash
-   npm run dev
-   ```
-
-3. **查看日志**
-   ```bash
-   wrangler tail
-   ```
-
-4. **重新部署**
-   ```bash
-   wrangler deploy
-   ```
-
-### 💰 成本控制
-
-#### 免费额度
-
-- **Workers 请求**：100,000 次/天
-- **KV 读取**：100,000 次/天
-- **KV 写入**：1,000 次/天
-- **CPU 时间**：10ms/请求
-
-#### 使用量监控
-
-在 Cloudflare Dashboard 中查看：
-1. Workers > 你的 Worker > Analytics
-2. Workers > KV > 你的命名空间 > Analytics
-
-#### 优化建议
-
-1. **减少请求频率**：已内置 2 秒延迟
-2. **优化 sitemap 大小**：建议单个文件 < 1MB
-3. **合理设置监控数量**：建议 < 50 个 sitemap
-
-### 🎉 部署完成
-
-恭喜！你的 Site Bot 已经成功部署到 Cloudflare Workers。
-
-#### 下一步
-
-1. **测试功能**：在 Telegram 中发送 `/start` 命令
-2. **添加监控**：使用 `/rss add URL` 添加 sitemap
-3. **查看状态**：访问 `/api/status` 查看运行状态
-4. **监控日志**：使用 `wrangler tail` 查看实时日志
-
-#### 支持
-
-如果遇到问题，请：
-1. 查看本文档的故障排除部分
-2. 检查 Cloudflare Workers 日志
-3. 提交 Issue 到项目仓库 
+当前 V2 实现是"域名级整份 sitemap 对比"，尚不支持：robots.txt 自动发现、sitemap index/子 sitemap 递归解析、每日新增 URL 的完整清单与导出、24h/7d/30d 趋势统计、带置信度的游戏识别、跨域名合并前的人工审核。这些能力正在按里程碑逐步补齐，进度和设计取舍见项目 issue / PR 描述。

@@ -132,25 +132,23 @@ export async function getFeeds() {
   return data || []
 }
 
-// 添加 feed
+// 添加 feed（经服务端 API route 写入，浏览器端不再用 anon key 直连数据库写库）
 export async function addFeed(url: string) {
-  const domain = new URL(url).hostname
-  const { data, error } = await supabase
-    .from('feeds')
-    .insert({ url, domain })
-    .select()
-    .single()
-
-  if (error) throw error
+  const res = await fetch('/api/feeds', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error || 'Failed to add sitemap')
   return data
 }
 
-// 删除 feed
+// 删除 feed（经服务端 API route 写入，浏览器端不再用 anon key 直连数据库写库）
 export async function deleteFeed(id: number) {
-  const { error } = await supabase
-    .from('feeds')
-    .delete()
-    .eq('id', id)
-
-  if (error) throw error
+  const res = await fetch(`/api/feeds?id=${id}`, { method: 'DELETE' })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.error || 'Failed to delete sitemap')
+  }
 }
