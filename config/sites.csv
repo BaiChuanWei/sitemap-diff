@@ -2,8 +2,8 @@ site_id,domain,priority,enabled,robots_url,sitemap_url,expected_game_path,notes,
 coolmathgames,coolmathgames.com,high,true,https://coolmathgames.com/robots.txt,,,分组:B；robots.txt未声明Sitemap，依赖discovery常见路径探测,B
 crazygames,crazygames.com,high,true,https://crazygames.com/robots.txt,,/game/,分组:B,B
 crazygames_2,crazygames.org,high,true,https://crazygames.org/robots.txt,,/game/,分组:B,B
-friv,friv.com,high,true,https://friv.com/robots.txt,,/game/,分组:B,B
-y8,y8.com,high,true,https://y8.com/robots.txt,,/games/,分组:B,B
+friv,friv.com,high,true,https://friv.com/robots.txt,,/game/,分组:A(M5阶段2 2026-07-13实测确认：1个Sitemap Endpoint，1112个页面URL，普通urlset，非Index)；complete=true/truncated=false，两轮验证added=0无虚假新增,A
+y8,y8.com,high,true,https://y8.com/robots.txt,,/games/,分组:C(M5阶段2 2026-07-13实测确认：3个Sitemap Endpoint，34582个页面URL，含XML.GZ，与D同域名多Sitemap特征重叠)；complete=true/truncated=false，两轮验证added=0无虚假新增,C
 itch,itch.io,high,true,https://itch.io/robots.txt,,,分组:D,D
 miniclip,miniclip.com,high,true,https://miniclip.com/robots.txt,,/games/,分组:D；robots.txt未声明Sitemap，依赖discovery常见路径探测,D
 4399,4399.com,high,true,https://4399.com/robots.txt,,,分组:E；robots.txt未声明Sitemap，依赖discovery常见路径探测,E
@@ -15,7 +15,7 @@ gamejolt,gamejolt.com,high,true,https://gamejolt.com/robots.txt,,,分组:E；rob
 gamesgames,gamesgames.com,high,true,https://gamesgames.com/robots.txt,,,分组:E；robots.txt未声明Sitemap，依赖discovery常见路径探测,E
 kizi,kizi.com,high,true,https://kizi.com/robots.txt,,,分组:E,E
 kongregate,kongregate.com,high,true,https://kongregate.com/robots.txt,,,分组:E；robots.txt未声明Sitemap，依赖discovery常见路径探测,E
-poki,poki.com,high,true,https://poki.com/robots.txt,,/g/,分组:E,E
+poki,poki.com,high,true,https://poki.com/robots.txt,,/g/,分组:B(M5阶段2 2026-07-13实测确认：137个Sitemap Endpoint，Sitemap Index结构，55024个页面URL，属大型站兼E类)；complete=true/truncated=false，两轮验证added=0无虚假新增,B
 twoplayergames,twoplayergames.org,high,true,https://twoplayergames.org/robots.txt,,,分组:E,E
 minijuegos,minijuegos.com,high,true,https://minijuegos.com/robots.txt,,,分组:F；curl验证时首页返回403，需确认真实抓取行为,F
 silvergames,silvergames.com,high,true,https://silvergames.com/robots.txt,,,分组:F；curl验证时首页返回403，需确认真实抓取行为；robots.txt未声明Sitemap，依赖discovery常见路径探测,F

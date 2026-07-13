@@ -5,7 +5,8 @@ import { loadLocalConfig, parseSitesCsv } from '../src/config.js';
 test('loadLocalConfig: 默认路径都在项目内，且可以被 overrides 覆盖', () => {
   const defaults = loadLocalConfig();
   assert.match(defaults.dbPath, /data[/\\]local\.db$/);
-  assert.match(defaults.sitesCsvPath, /config[/\\]sites\.example\.csv$/);
+  assert.match(defaults.sitesCsvPath, /config[/\\]sites\.csv$/);
+  assert.doesNotMatch(defaults.sitesCsvPath, /sites\.example\.csv$/, '默认清单不能是示例文件');
   assert.match(defaults.outputDir, /output$/);
 
   const overridden = loadLocalConfig({ dbPath: '/tmp/x.db' });

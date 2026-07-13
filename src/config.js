@@ -18,11 +18,15 @@ export const SITES_CSV_HEADERS = [
 /**
  * 加载本地配置：SQLite 数据库路径、站点清单 CSV 路径、报告输出目录。
  * 全部支持通过 overrides 覆盖，方便测试用临时目录。
+ *
+ * 默认站点清单是正式的 config/sites.csv（生产用，不提交示例数据）。
+ * config/sites.example.csv 只是模板，永远不作为默认路径——避免真实
+ * --collect/--inspect-site 在没人注意的情况下悄悄跑在示例数据上。
  */
 export function loadLocalConfig(overrides = {}) {
   return {
     dbPath: overrides.dbPath || resolve(projectRoot, 'data', 'local.db'),
-    sitesCsvPath: overrides.sitesCsvPath || resolve(projectRoot, 'config', 'sites.example.csv'),
+    sitesCsvPath: overrides.sitesCsvPath || resolve(projectRoot, 'config', 'sites.csv'),
     outputDir: overrides.outputDir || resolve(projectRoot, 'output'),
     lockPath: overrides.lockPath || resolve(projectRoot, 'data', 'collector.lock'),
   };

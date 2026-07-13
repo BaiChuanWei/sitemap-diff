@@ -120,7 +120,8 @@ node bin/run.js --inspect-url https://example.com/sitemap.xml
 
 ## 本地配置
 
-- 站点清单：`config/sites.example.csv`（字段：`site_id,domain,priority,enabled,robots_url,sitemap_url,expected_game_path,notes`），目前只有模板示例行，正式使用前需要替换成约 100 个真实站点
+- 站点清单：**默认 `config/sites.csv`**（`--collect`、`--inspect-site` 等命令都读这个文件，字段：`site_id,domain,priority,enabled,robots_url,sitemap_url,expected_game_path,notes`，外加一列 `site_category` 记录 Milestone 5 站点分组）。当前是从公网收集并逐个验证可达性后建立的候选池（约 100 站），**尚未全部经过项目采集器确认**——具体见 `config/sites.csv` 每行 `notes`/`site_category`，以及 Milestone 5 各阶段验证报告里对已确认站点的更新。
+  `config/sites.example.csv` 仍然保留作为模板（3 行示例），**不是**默认读取的文件；如果 `config/sites.csv` 不存在，`loadRecords` 会明确报错并提示"可以从 `sites.example.csv` 复制一份"，不会静默回退到示例数据上运行。
 - SQLite 数据库：默认 `data/local.db`（首次运行自动创建，已在 `.gitignore` 中排除，不提交到仓库）
 - 运行锁：默认 `data/collector.lock`（`--collect` 运行期间存在，正常/异常结束都会清理，已随 `data/` 一起被 `.gitignore` 排除）
 - 报告输出：默认 `output/`（Milestone 4 才会开始写入正式日报，已在 `.gitignore` 中排除）；`--inspect-site`/`--inspect-url` 的调试结果会写到 `output/debug/`，与正式日报目录分开

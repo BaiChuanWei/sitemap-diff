@@ -59,9 +59,10 @@ function parseArgs(argv) {
   return args;
 }
 
-function loadRecords(config) {
+export function loadRecords(config) {
   if (!existsSync(config.sitesCsvPath)) {
     console.error(`站点清单文件不存在: ${config.sitesCsvPath}`);
+    console.error('提示：可以从 config/sites.example.csv 复制一份改成正式清单，或恢复被误删的 config/sites.csv。');
     process.exitCode = 1;
     return null;
   }
@@ -304,4 +305,9 @@ function safeLabel(url) {
   }
 }
 
-main();
+// 只有直接以 CLI 方式运行（node bin/run.js ...）才执行 main()；被测试 import 时不触发，
+// 避免测试悄悄跑到真实的 data/local.db 上。
+const isMainModule = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
+if (isMainModule) {
+  main();
+}
