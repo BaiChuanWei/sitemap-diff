@@ -8,16 +8,20 @@ import { collectSite } from '../src/sitemap/collector.js';
 import { runCollect } from '../src/collect-runner.js';
 import { getDbStatus } from '../src/storage/index.js';
 import { acquireLock, releaseLock } from '../src/lock.js';
+import { classifyRun } from '../src/classify/runner.js';
+import { generateReport } from '../src/report/report.js';
 
 /**
  * 本地入口。
  *
  * 默认（无参数）：加载配置、初始化 SQLite、同步站点清单（Milestone 1 行为）。
  *
- * Milestone 3：
- *   --collect            采集全部启用站点，写入正式 URL 历史（带运行锁）
- *   --collect --site <id> 只采集指定站点
- *   --db-status          打印数据库状态
+ * Milestone 3/4：
+ *   --collect [--site <id>] [--classify] [--report]  采集（可链式分类/报告）
+ *   --classify-run <run_id>   对某次运行的新增 URL 做页面初筛分类（幂等）
+ *   --report-run <run_id>     为某次运行生成本地报告（幂等）
+ *   --report-latest           为最近一次运行生成报告
+ *   --db-status               打印数据库状态
  *
  * Milestone 2（只做采集检查，不写正式 URL 历史）：
  *   --inspect-site <id>
@@ -29,7 +33,10 @@ async function main() {
   if (args.inspectSite) return runInspectSite(args.inspectSite);
   if (args.inspectUrl) return runInspectUrl(args.inspectUrl);
   if (args.dbStatus) return runDbStatus();
-  if (args.collect) return runCollectCommand(args.site);
+  if (args.classifyRun) return runClassifyCommand(args.classifyRun);
+  if (args.reportRun) return runReportCommand(args.reportRun);
+  if (args.reportLatest) return runReportCommand(null, { latest: true });
+  if (args.collect) return runCollectCommand(args.site, { classify: args.classify, report: args.report });
 
   return runBaseline();
 }
@@ -43,6 +50,11 @@ function parseArgs(argv) {
     else if (a === '--collect') args.collect = true;
     else if (a === '--site') args.site = argv[++i];
     else if (a === '--db-status') args.dbStatus = true;
+    else if (a === '--classify-run') args.classifyRun = argv[++i];
+    else if (a === '--report-run') args.reportRun = argv[++i];
+    else if (a === '--report-latest') args.reportLatest = true;
+    else if (a === '--classify') args.classify = true;
+    else if (a === '--report') args.report = true;
   }
   return args;
 }
@@ -70,7 +82,9 @@ function runBaseline() {
     console.log(`  站点清单同步: 共 ${total} 个（新增 ${inserted}，更新 ${updated}）`);
     console.log('');
     console.log('可用命令：');
-    console.log('  --collect [--site <id>]   采集并写入正式 URL 历史（Milestone 3）');
+    console.log('  --collect [--site <id>] [--classify] [--report]   采集（可链式分类/报告）');
+    console.log('  --classify-run <run_id>   对某次运行的新增 URL 做页面初筛分类（幂等）');
+    console.log('  --report-run <run_id> / --report-latest   生成本地报告（幂等）');
     console.log('  --db-status               查看数据库状态');
     console.log('  --inspect-site <id> / --inspect-url <url>   只做采集检查，不写正式历史（Milestone 2）');
   } finally {
@@ -78,7 +92,7 @@ function runBaseline() {
   }
 }
 
-async function runCollectCommand(siteFilter) {
+async function runCollectCommand(siteFilter, { classify = false, report = false } = {}) {
   const config = loadLocalConfig();
   const records = loadRecords(config);
   if (!records) return;
@@ -124,8 +138,68 @@ async function runCollectCommand(siteFilter) {
       const extra = o.status === 'success' ? (o.isBaseline ? '（baseline）' : `（新增 ${o.added}）`) : '';
       console.log(`    - ${o.siteId}: ${o.status}${extra}`);
     }
+
+    // 组合命令：各步骤仍可独立重跑，这里只是链式触发。
+    if (classify) await classifyStep(db, runId);
+    if (report) reportStep(db, runId, config);
+
+    console.log('');
+    console.log(`后续可单独重跑：node bin/run.js --classify-run ${runId} / --report-run ${runId}`);
   } finally {
     releaseLock(config.lockPath, runId);
+    db.close();
+  }
+}
+
+async function classifyStep(db, runId) {
+  console.log('');
+  console.log(`开始分类 runId=${runId} 的新增 URL...`);
+  const c = await classifyRun(db, { runId });
+  console.log(`  分类完成：共 ${c.total}（game ${c.counts.game} / non_game ${c.counts.non_game} / unknown ${c.counts.unknown}），分类失败 ${c.classificationErrors}`);
+  return c;
+}
+
+function reportStep(db, runId, config) {
+  const r = generateReport(db, { runId, outputDir: config.outputDir });
+  console.log('');
+  console.log(`报告已生成：${r.dir}`);
+  console.log(`  new-urls.csv / new-urls.json / new-games.csv / unknown-urls.csv / report.md`);
+  console.log(`  统计：新增 ${r.stats.addedTotal}（game ${r.stats.gameCount} / non_game ${r.stats.nonGameCount} / unknown ${r.stats.unknownCount}）`);
+  return r;
+}
+
+async function runClassifyCommand(runId) {
+  const config = loadLocalConfig();
+  const db = openDb(config.dbPath);
+  try {
+    await classifyStep(db, runId);
+  } finally {
+    db.close();
+  }
+}
+
+function runReportCommand(runId, { latest = false } = {}) {
+  const config = loadLocalConfig();
+  const db = openDb(config.dbPath);
+  try {
+    let targetRunId = runId;
+    if (latest) {
+      const row = db.prepare('SELECT run_id FROM crawl_runs ORDER BY started_at DESC LIMIT 1').get();
+      if (!row) {
+        console.error('还没有任何运行记录，无法生成报告。');
+        process.exitCode = 1;
+        return;
+      }
+      targetRunId = row.run_id;
+    }
+    const exists = db.prepare('SELECT 1 FROM crawl_runs WHERE run_id = ?').get(targetRunId);
+    if (!exists) {
+      console.error(`找不到 run_id=${targetRunId} 的运行记录。`);
+      process.exitCode = 1;
+      return;
+    }
+    reportStep(db, targetRunId, config);
+  } finally {
     db.close();
   }
 }

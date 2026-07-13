@@ -12,9 +12,19 @@
 
 历史上项目经历过两次云端方向的实现（Cloudflare Workers + Discord/Telegram Bot，以及 GitHub Actions + Supabase + Vercel/Next.js），均已归档到 `legacy/`，不在当前实现范围内，但保留供未来参考。
 
-## 当前状态：Milestone 3（SQLite Baseline 与新增 URL）
+## 当前状态：Milestone 4（游戏页面初筛与本地报告）
 
-按 `CLAUDE.md` 定义的 5 个 Milestone，当前完成到 Milestone 3：在 Milestone 2 采集器之上，把完整成功的采集结果落进本地 SQLite，并判断哪些页面 URL 是该站第一次出现。
+按 `CLAUDE.md` 定义的 5 个 Milestone，当前完成到 Milestone 4：读取 Milestone 3 保存的 `added_urls`，对全部新增 URL 做可解释的页面分类（`game` / `non_game` / `unknown`）和游戏名初步提取，并生成本地报告。
+
+- 分类结果带 `evidence` 与 `confidence`（high/medium/low），存入 `url_classifications`（迁移 `0003`）；
+- **所有新增 URL 都会被分类并导出，识别不出记为 `unknown`，绝不丢弃**；页面抓取失败 → `unknown/low` + `classification_error`，URL 仍保留；
+- 每次运行输出到 `output/YYYY-MM-DD/<run_id>/`：`new-urls.csv`、`new-urls.json`、`new-games.csv`、`unknown-urls.csv`、`report.md`（同一天不同 run 各自独立目录，不覆盖）；
+- 页面抓取复用 Milestone 2 的 fetcher（超时/重试/大小上限/Gzip）+ 全局与同域名并发限制，只抓本轮新增 URL；
+- 分类与报告都**幂等**、可独立重跑；报告只读 SQLite，报告失败不破坏历史数据。
+
+### Milestone 3：SQLite Baseline 与新增 URL
+
+在 Milestone 2 采集器之上，把完整成功的采集结果落进本地 SQLite，并判断哪些页面 URL 是该站第一次出现。
 
 - **首次完整成功运行**只建立 baseline（保存全部当前 URL，新增 = 0），不会把第一次看到的 URL 当成新增；
 - **后续完整成功运行**用"本轮 URL − 该站已见 URL"算出新增 URL；
@@ -63,12 +73,24 @@ src/
   storage/
     normalize.js            # 保守 URL 标准化 + sha256 哈希
     index.js                 # baseline/新增判定、事务写入、拒绝写入、db-status 查询
+  classify/
+    game-name.js            # 游戏名候选提取（移植 legacy 平台规则 + expected_game_path）
+    non-game.js              # 非游戏页面判定（静态资源/分类/标签/搜索/登录…）
+    page-meta.js             # 轻量 HTML 元数据提取（title/h1/og:title/canonical/JSON-LD）
+    classifier.js            # 证据 + 置信度：game/non_game/unknown
+    page-fetcher.js          # 复用 M2 fetcher 抓取新增 URL 页面（全局+同域名并发）
+    runner.js                # 读 added_urls → 分类 → 幂等写 url_classifications
+  report/
+    csv.js                   # 极简 CSV 序列化（转义 + UTF-8）
+    report.js                # 生成 output/YYYY-MM-DD/<run_id>/ 五个文件（只读 SQLite）
 config/
   sites.example.csv       # 站点清单模板（真实约 100 站清单待补）
 test/
-  *.test.js               # node:test 单元测试（含运行锁、编排、inspect 不写库）
+  *.test.js               # node:test 单元测试（含运行锁、编排、inspect 不写库、迁移升级）
   sitemap/                # Sitemap 采集器测试（解析器/抓取器/发现/递归/端到端）
   storage/                 # URL 标准化 + baseline/新增/幂等/事务回滚/拒绝写入测试
+  classify/                # 分类器 + 分类运行（三类/置信度/抓取失败保留/幂等）
+  report/                  # 报告生成（CSV/JSON 一致性/子集/幂等/UTF-8/失败不破坏库）
   helpers/                 # 测试用本地 HTTP Server
   fixtures/                # Sitemap 测试样本（含真实 gzip 文件）
 docs/
@@ -87,6 +109,10 @@ npm test                                     # node --test，跑 test/ 下全部
 npm start                                     # 运行本地入口（bin/run.js），只做配置/SQLite 基线同步
 node bin/run.js --collect                     # 采集全部启用站点，写入正式 URL 历史（带运行锁）
 node bin/run.js --collect --site poki         # 只采集指定站点
+node bin/run.js --collect --classify --report # 采集 → 分类 → 生成报告（各步骤仍可独立重跑）
+node bin/run.js --classify-run <run_id>       # 对某次运行的新增 URL 做页面初筛分类（幂等）
+node bin/run.js --report-run <run_id>         # 为某次运行生成本地报告（幂等）
+node bin/run.js --report-latest               # 为最近一次运行生成报告
 node bin/run.js --db-status                   # 查看数据库状态（站点数/baseline/seen/added/最近运行）
 node bin/run.js --inspect-site poki           # 只做 Sitemap 采集检查，不写正式 URL 历史
 node bin/run.js --inspect-url https://example.com/sitemap.xml
