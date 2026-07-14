@@ -932,6 +932,9 @@ function renderRunActive(active, sites) {
     ['成功 / 部分 / 失败', `${active.stats.sitesSuccess} / ${active.stats.sitesPartial} / ${active.stats.sitesFailed}`],
     ['baseline 站点', active.stats.baselineSiteCount],
     ['新增 URL', active.stats.addedUrlCount],
+    ['本轮缺失', active.stats.missingUrlCount ?? 0],
+    ['连续两轮缺失', active.stats.consecutiveMissingCount ?? 0],
+    ['恢复', active.stats.restoredUrlCount ?? 0],
   ];
   for (const [label, value] of cardData) {
     const card = el('div', { className: 'card' });
@@ -992,6 +995,9 @@ async function renderRunFinished(runId) {
     ['成功 / 部分 / 失败', `${run.sites_success} / ${run.sites_partial} / ${run.sites_failed}`],
     ['baseline 站点', run.baseline_site_count],
     ['新增 URL', run.added_url_count],
+    ['本轮缺失', run.missing_url_count ?? 0],
+    ['连续两轮缺失', run.consecutive_missing_count ?? 0],
+    ['恢复', run.restored_url_count ?? 0],
   ];
   for (const [label, value] of cardData) {
     const card = el('div', { className: 'card' });
@@ -1061,7 +1067,7 @@ function applyRunSitesFilter() {
   const tbody = document.querySelector('#run-sites-table tbody');
   tbody.replaceChildren();
   if (filtered.length === 0) {
-    tbody.append(rowWithMessage(9, '没有符合条件的站点'));
+    tbody.append(rowWithMessage(12, '没有符合条件的站点'));
     return;
   }
   for (const s of filtered) {
@@ -1074,19 +1080,38 @@ function applyRunSitesFilter() {
       wrapCell(statusBadge(s.status)),
       el('td', { text: String(s.pageUrlCount ?? 0) }),
       addedTd,
+      changeCountCell(s.missingUrlCount, s.comparisonPerformed),
+      changeCountCell(s.consecutiveMissingCount, s.comparisonPerformed),
+      changeCountCell(s.restoredUrlCount, s.comparisonPerformed),
       el('td', { text: s.isBaseline === true ? '是' : s.isBaseline === false ? '否' : '-' }),
       el('td', { text: s.durationMs != null ? `${(s.durationMs / 1000).toFixed(1)}s` : '-' }),
       el('td', { text: s.errorSummary || '-' }),
     );
     const actionsTd = el('td');
-    if (s.addedUrlCount > 0) {
-      const btn = el('button', { text: '查看新增' });
-      btn.addEventListener('click', () => openRunChanges(runId, s.siteId));
+    const actionButtons = [
+      ['added', s.addedUrlCount, '新增'],
+      ['missing', s.missingUrlCount, '缺失'],
+      ['consecutive_missing', s.consecutiveMissingCount, '连续缺失'],
+      ['restored', s.restoredUrlCount, '恢复'],
+    ];
+    for (const [type, count, label] of actionButtons) {
+      if (!(count > 0)) continue;
+      const btn = el('button', { text: `查看${label}` });
+      btn.addEventListener('click', () => openRunChanges(runId, s.siteId, type));
       actionsTd.append(btn);
     }
     tr.append(actionsTd);
     tbody.append(tr);
   }
+}
+
+/** 缺失/连续两轮缺失/恢复三种计数的单元格：未进行变化对比时明确展示"未对比"，不能显示成误导性的 0。 */
+function changeCountCell(count, comparisonPerformed) {
+  if (comparisonPerformed === false) return el('td', { text: '未对比', className: 'muted' });
+  if (comparisonPerformed == null) return el('td', { text: '-' }); // 站点还在等待/运行中，尚无结果
+  const td = el('td', { text: String(count ?? 0) });
+  if (count > 0) td.className = 'has-added';
+  return td;
 }
 
 async function cancelActiveRun(runId) {
@@ -1145,30 +1170,38 @@ async function onStartAllClick() {
   await startRun({ mode: 'all' });
 }
 
-async function openRunChanges(runId, siteId, page = 1) {
+const CHANGE_TYPE_LABEL = {
+  added: '新增',
+  missing: '本轮缺失',
+  consecutive_missing: '连续两轮缺失',
+  restored: '恢复',
+};
+
+async function openRunChanges(runId, siteId, type = 'added', page = 1) {
   showRunPanel('run-changes-panel');
-  document.getElementById('run-changes-title').textContent = `新增 URL：${siteId}`;
-  state.run.changesContext = { runId, siteId, page };
+  document.getElementById('run-changes-title').textContent = `${CHANGE_TYPE_LABEL[type] || type} URL：${siteId}`;
+  document.getElementById('run-changes-caveat').hidden = type !== 'missing' && type !== 'consecutive_missing';
+  state.run.changesContext = { runId, siteId, type, page };
   await loadRunChangesPage();
 }
 
 async function loadRunChangesPage() {
-  const { runId, siteId, page } = state.run.changesContext;
+  const { runId, siteId, type, page } = state.run.changesContext;
   const tbody = document.querySelector('#run-changes-table tbody');
   tbody.replaceChildren(rowWithMessage(4, '加载中...'));
   try {
     const data = await fetchJson(
-      `/api/runs/${encodeURIComponent(runId)}/changes?site_id=${encodeURIComponent(siteId)}&page=${page}&page_size=50`,
+      `/api/runs/${encodeURIComponent(runId)}/changes?site_id=${encodeURIComponent(siteId)}&type=${encodeURIComponent(type)}&page=${page}&page_size=50`,
     );
     tbody.replaceChildren();
     if (data.items.length === 0) {
-      tbody.append(rowWithMessage(4, '没有新增 URL'));
+      tbody.append(rowWithMessage(4, `没有${CHANGE_TYPE_LABEL[type] || type} URL`));
     }
     for (const item of data.items) {
       const tr = document.createElement('tr');
       tr.append(
         el('td', { text: item.originalUrl }),
-        el('td', { text: item.pageType }),
+        el('td', { text: type === 'added' ? item.pageType : CHANGE_TYPE_LABEL[item.changeType] || item.changeType }),
         el('td', { text: item.gameName || '-' }),
         el('td', { text: formatTime(item.detectedAt) }),
       );

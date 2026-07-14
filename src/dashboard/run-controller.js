@@ -87,6 +87,10 @@ export function createRunController({
           truncated: null,
           pageUrlCount: 0,
           addedUrlCount: 0,
+          missingUrlCount: 0,
+          consecutiveMissingCount: 0,
+          restoredUrlCount: 0,
+          comparisonPerformed: null,
           isBaseline: null,
           durationMs: null,
           errorCode: null,
@@ -111,6 +115,9 @@ export function createRunController({
         baselineSiteCount: 0,
         baselineUrlCount: 0,
         addedUrlCount: 0,
+        missingUrlCount: 0,
+        consecutiveMissingCount: 0,
+        restoredUrlCount: 0,
       },
     };
     activeRun = run;
@@ -228,6 +235,10 @@ export function createRunController({
           truncated: payload.truncated,
           pageUrlCount: payload.pageUrlCount,
           addedUrlCount: payload.addedUrlCount,
+          missingUrlCount: payload.missingUrlCount,
+          consecutiveMissingCount: payload.consecutiveMissingCount,
+          restoredUrlCount: payload.restoredUrlCount,
+          comparisonPerformed: payload.comparisonPerformed,
           isBaseline: payload.isBaseline,
           durationMs: payload.durationMs,
           errorCode: payload.errorCode,
@@ -251,6 +262,9 @@ export function createRunController({
         run.stats.sitesPartial++;
       }
       run.stats.addedUrlCount += payload.addedUrlCount || 0;
+      run.stats.missingUrlCount += payload.missingUrlCount || 0;
+      run.stats.consecutiveMissingCount += payload.consecutiveMissingCount || 0;
+      run.stats.restoredUrlCount += payload.restoredUrlCount || 0;
       broadcast('site_finished', payload);
       logEvent({
         run_id: run.runId,
@@ -308,7 +322,9 @@ export function createRunController({
     const rows = db
       .prepare(
         `SELECT scr.site_id, s.domain, scr.status, scr.complete, scr.truncated,
-                scr.page_url_count, scr.added_url_count, scr.duration_ms, scr.error_summary
+                scr.page_url_count, scr.added_url_count,
+                scr.missing_url_count, scr.consecutive_missing_count, scr.restored_url_count, scr.comparison_performed,
+                scr.duration_ms, scr.error_summary
          FROM site_crawl_runs scr LEFT JOIN sites s ON s.site_id = scr.site_id
          WHERE scr.run_id = ? ORDER BY scr.site_id ASC`,
       )
@@ -322,6 +338,10 @@ export function createRunController({
       truncated: !!r.truncated,
       pageUrlCount: r.page_url_count,
       addedUrlCount: r.added_url_count,
+      missingUrlCount: r.missing_url_count,
+      consecutiveMissingCount: r.consecutive_missing_count,
+      restoredUrlCount: r.restored_url_count,
+      comparisonPerformed: !!r.comparison_performed,
       // 运行结束、内存态清空后，"这一站是不是本次 baseline"这个标记不再
       // 持久化（site_crawl_runs 没有这一列）——只在运行进行中通过内存态
       // 提供，历史查询统一返回 null，不猜测。

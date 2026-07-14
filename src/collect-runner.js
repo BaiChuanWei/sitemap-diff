@@ -69,6 +69,9 @@ export async function runCollect(
     baselineSiteCount: 0,
     baselineUrlCount: 0,
     addedUrlCount: 0,
+    missingUrlCount: 0,
+    consecutiveMissingCount: 0,
+    restoredUrlCount: 0,
   };
   const siteOutcomes = [];
   const errorSummaries = [];
@@ -120,6 +123,9 @@ export async function runCollect(
         const persisted = persistCompleteSiteResult(db, { runId, site, result, now: ts });
         stats.sitesSuccess++;
         stats.addedUrlCount += persisted.addedCount;
+        stats.missingUrlCount += persisted.missingCount;
+        stats.consecutiveMissingCount += persisted.consecutiveMissingCount;
+        stats.restoredUrlCount += persisted.restoredCount;
         if (persisted.isBaseline) {
           stats.baselineSiteCount++;
           stats.baselineUrlCount += persisted.pageUrlCount;
@@ -134,6 +140,10 @@ export async function runCollect(
           truncated: false,
           pageUrlCount: persisted.pageUrlCount,
           addedUrlCount: persisted.addedCount,
+          missingUrlCount: persisted.missingCount,
+          consecutiveMissingCount: persisted.consecutiveMissingCount,
+          restoredUrlCount: persisted.restoredCount,
+          comparisonPerformed: true,
           isBaseline: persisted.isBaseline,
           durationMs,
           errorCode: null,
@@ -162,6 +172,10 @@ export async function runCollect(
           truncated: !!result.truncated,
           pageUrlCount: Number(result.pageUrlCount) || 0,
           addedUrlCount: 0,
+          missingUrlCount: 0,
+          consecutiveMissingCount: 0,
+          restoredUrlCount: 0,
+          comparisonPerformed: false,
           isBaseline: false,
           durationMs,
           errorCode: firstError ? firstError.code || null : null,
@@ -192,6 +206,10 @@ export async function runCollect(
         truncated: false,
         pageUrlCount: 0,
         addedUrlCount: 0,
+        missingUrlCount: 0,
+        consecutiveMissingCount: 0,
+        restoredUrlCount: 0,
+        comparisonPerformed: false,
         isBaseline: false,
         durationMs,
         errorCode: 'DB_WRITE_FAILED',

@@ -28,7 +28,7 @@ test('测试13 旧数据库（只有 0001+0002）可平滑升级到 0003', () =>
     // 用正式入口重新打开 → 应自动应用 0003 及之后的全部迁移
     const db = openDb(dbPath);
     const applied = listAppliedMigrations(db);
-    assert.deepEqual(applied, ['0001_baseline', '0002_url_history', '0003_url_classification', '0004_run_mode']);
+    assert.deepEqual(applied, ['0001_baseline', '0002_url_history', '0003_url_classification', '0004_run_mode', '0005_url_lifecycle']);
     const tbl = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='url_classifications'").get();
     assert.ok(tbl, 'url_classifications 表应存在');
     // 旧数据仍在

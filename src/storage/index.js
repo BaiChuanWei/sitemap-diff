@@ -41,6 +41,9 @@ export function finishCrawlRun(db, { runId, finishedAt, status, stats, errorSumm
        baseline_site_count = @baseline_site_count,
        baseline_url_count = @baseline_url_count,
        added_url_count = @added_url_count,
+       missing_url_count = @missing_url_count,
+       consecutive_missing_count = @consecutive_missing_count,
+       restored_url_count = @restored_url_count,
        error_summary = @error_summary
      WHERE run_id = @run_id`,
   ).run({
@@ -54,6 +57,9 @@ export function finishCrawlRun(db, { runId, finishedAt, status, stats, errorSumm
     baseline_site_count: stats.baselineSiteCount || 0,
     baseline_url_count: stats.baselineUrlCount || 0,
     added_url_count: stats.addedUrlCount || 0,
+    missing_url_count: stats.missingUrlCount || 0,
+    consecutive_missing_count: stats.consecutiveMissingCount || 0,
+    restored_url_count: stats.restoredUrlCount || 0,
     error_summary: errorSummary || null,
   });
 }
@@ -141,6 +147,18 @@ export function persistCompleteSiteResult(db, { runId, site, result, now, hooks 
       }
     }
 
+    // 5b. Dashboard M4：URL 生命周期比较（missing / consecutive_missing /
+    // restored）。首次 baseline 时 url_status 里该站还没有任何行，比较结果
+    // 自然全为 0，不需要单独判断 isBaseline。恢复的 URL 一定已经在
+    // seen_urls 里（否则不可能"曾经缺失"），所以上面的 existingHashes 判断
+    // 已经天然把它们排除在 newRecords/added_urls 之外，这里不需要再额外
+    // 处理"不能把 restored 算成 added"这条约束。
+    const lifecycle = applyUrlLifecycle(db, { siteId, runId, records, ts });
+
+    // 测试注入点：验证"写完 url_status/url_changes 后、写 site_crawl_runs
+    // 前"抛错能把生命周期相关的写入也一并回滚。
+    if (typeof hooks.afterLifecycle === 'function') hooks.afterLifecycle();
+
     // 6. 更新 sites 最后成功状态；首次成功时打上 baseline_completed_at。
     db.prepare(
       `UPDATE sites SET
@@ -161,12 +179,120 @@ export function persistCompleteSiteResult(db, { runId, site, result, now, hooks 
       addedCount: isBaseline ? 0 : addedCount,
       ts,
       errorSummary: null,
+      missingCount: lifecycle.missingCount,
+      consecutiveMissingCount: lifecycle.consecutiveMissingCount,
+      restoredCount: lifecycle.restoredCount,
+      comparisonPerformed: true,
     });
 
-    return { isBaseline, addedCount: isBaseline ? 0 : addedCount, pageUrlCount: records.length, newSeenCount: newRecords.length };
+    return {
+      isBaseline,
+      addedCount: isBaseline ? 0 : addedCount,
+      pageUrlCount: records.length,
+      newSeenCount: newRecords.length,
+      missingCount: lifecycle.missingCount,
+      consecutiveMissingCount: lifecycle.consecutiveMissingCount,
+      restoredCount: lifecycle.restoredCount,
+      comparisonPerformed: true,
+    };
   });
 
   return tx();
+}
+
+/**
+ * 把"本轮之前 is_present=1 的 URL 集合"与"本轮实际拿到的完整 URL 集合"
+ * 相比较，更新 url_status（当前状态）并在 url_changes（历史事件流水）里
+ * 记录 missing / consecutive_missing / restored。
+ *
+ * 状态机（每个 url_hash 独立）：
+ *   之前不存在于 url_status（第一次见到）        → 新建 is_present=1，不产生事件（由 added_urls 覆盖"新增"这个概念）
+ *   之前 is_present=1，本轮仍在                  → 只更新 last_seen_run_id，不产生事件
+ *   之前 is_present=1，本轮不在                  → missing（missing_streak: 0→1）
+ *   之前 is_present=0，本轮又出现                → restored（missing_streak 清零）
+ *   之前 is_present=0，本轮仍不在，streak 1→2    → consecutive_missing
+ *   之前 is_present=0，本轮仍不在，streak ≥2→+1  → 只累加 streak，不再重复产生事件（避免连续多轮持续刷屏）
+ *
+ * 必须在调用方已经打开的同一个事务里执行（本函数自己不开事务）。
+ */
+function applyUrlLifecycle(db, { siteId, runId, records, ts }) {
+  const statusRows = db
+    .prepare(
+      `SELECT url_hash, original_url, normalized_url, is_present, missing_streak
+       FROM url_status WHERE site_id = ?`,
+    )
+    .all(siteId);
+  const statusByHash = new Map(statusRows.map((r) => [r.url_hash, r]));
+  const recordsByHash = new Map(records.map((r) => [r.urlHash, r]));
+  const currentHashes = new Set(recordsByHash.keys());
+  const allHashes = new Set([...currentHashes, ...statusByHash.keys()]);
+
+  const insertPresent = db.prepare(
+    `INSERT INTO url_status (site_id, url_hash, original_url, normalized_url, is_present, missing_streak, last_seen_run_id, updated_at)
+     VALUES (@site_id, @url_hash, @original_url, @normalized_url, 1, 0, @run_id, @ts)`,
+  );
+  const touchPresent = db.prepare(
+    `UPDATE url_status SET last_seen_run_id = @run_id, updated_at = @ts
+     WHERE site_id = @site_id AND url_hash = @url_hash`,
+  );
+  const restorePresent = db.prepare(
+    `UPDATE url_status SET
+       is_present = 1, missing_streak = 0,
+       original_url = @original_url, normalized_url = @normalized_url,
+       last_seen_run_id = @run_id, last_change_run_id = @run_id, updated_at = @ts
+     WHERE site_id = @site_id AND url_hash = @url_hash`,
+  );
+  const markMissing = db.prepare(
+    `UPDATE url_status SET
+       is_present = 0, missing_streak = @streak,
+       last_change_run_id = COALESCE(@change_run_id, last_change_run_id), updated_at = @ts
+     WHERE site_id = @site_id AND url_hash = @url_hash`,
+  );
+  // INSERT OR IGNORE：和 added_urls 的写入方式一致——同一个 (run_id, site_id,
+  // url_hash) 理论上不会被处理第二次（collect-runner.js 每站每次运行只调用
+  // 一次本函数），但保持幂等写法，防止未来任何重试路径导致唯一约束冲突
+  // 把整个事务打断。
+  const insertChange = db.prepare(
+    `INSERT OR IGNORE INTO url_changes (run_id, site_id, url_hash, original_url, normalized_url, change_type, detected_at)
+     VALUES (@run_id, @site_id, @url_hash, @original_url, @normalized_url, @change_type, @ts)`,
+  );
+
+  let missingCount = 0;
+  let consecutiveMissingCount = 0;
+  let restoredCount = 0;
+
+  for (const hash of allHashes) {
+    const prior = statusByHash.get(hash);
+    if (currentHashes.has(hash)) {
+      const rec = recordsByHash.get(hash);
+      if (!prior) {
+        insertPresent.run({ site_id: siteId, url_hash: hash, original_url: rec.originalUrl, normalized_url: rec.normalizedUrl, run_id: runId, ts });
+      } else if (prior.is_present) {
+        touchPresent.run({ site_id: siteId, url_hash: hash, run_id: runId, ts });
+      } else {
+        restorePresent.run({ site_id: siteId, url_hash: hash, original_url: rec.originalUrl, normalized_url: rec.normalizedUrl, run_id: runId, ts });
+        insertChange.run({ run_id: runId, site_id: siteId, url_hash: hash, original_url: rec.originalUrl, normalized_url: rec.normalizedUrl, change_type: 'restored', ts });
+        restoredCount++;
+      }
+    } else {
+      // prior 一定存在：allHashes 只由 currentHashes 和 statusByHash 的 key 并集组成。
+      if (prior.is_present) {
+        markMissing.run({ site_id: siteId, url_hash: hash, streak: 1, change_run_id: runId, ts });
+        insertChange.run({ run_id: runId, site_id: siteId, url_hash: hash, original_url: prior.original_url, normalized_url: prior.normalized_url, change_type: 'missing', ts });
+        missingCount++;
+      } else {
+        const newStreak = prior.missing_streak + 1;
+        const firesConsecutive = newStreak === 2;
+        markMissing.run({ site_id: siteId, url_hash: hash, streak: newStreak, change_run_id: firesConsecutive ? runId : null, ts });
+        if (firesConsecutive) {
+          insertChange.run({ run_id: runId, site_id: siteId, url_hash: hash, original_url: prior.original_url, normalized_url: prior.normalized_url, change_type: 'consecutive_missing', ts });
+          consecutiveMissingCount++;
+        }
+      }
+    }
+  }
+
+  return { missingCount, consecutiveMissingCount, restoredCount };
 }
 
 /**
@@ -209,14 +335,20 @@ function upsertEndpoints(db, siteId, processedSitemaps, ts) {
   }
 }
 
-function insertSiteCrawlRun(db, { runId, site, result, addedCount, ts, errorSummary }) {
+function insertSiteCrawlRun(db, { runId, site, result, addedCount, ts, errorSummary, missingCount, consecutiveMissingCount, restoredCount, comparisonPerformed }) {
   db.prepare(
     `INSERT INTO site_crawl_runs
-       (run_id, site_id, status, complete, truncated, page_url_count, added_url_count, started_at, finished_at, duration_ms, error_summary)
-     VALUES (@run_id, @site_id, @status, @complete, @truncated, @page_url_count, @added_url_count, @started_at, @finished_at, @duration_ms, @error_summary)
+       (run_id, site_id, status, complete, truncated, page_url_count, added_url_count,
+        missing_url_count, consecutive_missing_count, restored_url_count, comparison_performed,
+        started_at, finished_at, duration_ms, error_summary)
+     VALUES (@run_id, @site_id, @status, @complete, @truncated, @page_url_count, @added_url_count,
+             @missing_url_count, @consecutive_missing_count, @restored_url_count, @comparison_performed,
+             @started_at, @finished_at, @duration_ms, @error_summary)
      ON CONFLICT(run_id, site_id) DO UPDATE SET
        status = @status, complete = @complete, truncated = @truncated,
        page_url_count = @page_url_count, added_url_count = @added_url_count,
+       missing_url_count = @missing_url_count, consecutive_missing_count = @consecutive_missing_count,
+       restored_url_count = @restored_url_count, comparison_performed = @comparison_performed,
        started_at = @started_at, finished_at = @finished_at, duration_ms = @duration_ms,
        error_summary = @error_summary`,
   ).run({
@@ -227,6 +359,10 @@ function insertSiteCrawlRun(db, { runId, site, result, addedCount, ts, errorSumm
     truncated: result?.truncated ? 1 : 0,
     page_url_count: Number(result?.pageUrlCount) || 0,
     added_url_count: addedCount || 0,
+    missing_url_count: missingCount || 0,
+    consecutive_missing_count: consecutiveMissingCount || 0,
+    restored_url_count: restoredCount || 0,
+    comparison_performed: comparisonPerformed ? 1 : 0,
     started_at: result?.startedAt || null,
     finished_at: result?.finishedAt || ts,
     duration_ms: Number(result?.durationMs) || null,
