@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sitemap 监控面板</title>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<header class="topbar">
+  <h1>Sitemap 监控面板</h1>
+  <div class="conn-status" id="conn-status">连接中...</div>
+</header>
+
+<main>
+  <section class="panel">
+    <h2>总览</h2>
+    <div class="cards" id="overview-cards">
+      <p class="muted">加载中...</p>
+    </div>
+    <div class="notice" id="stale-run-notice" hidden></div>
+  </section>
+
+  <section class="panel">
+    <h2>站点清单</h2>
+    <p class="muted">本版本（M1）仅支持查看，站点的新增/编辑/启停将在后续版本提供。</p>
+    <div class="table-wrap">
+      <table id="sites-table">
+        <thead>
+          <tr><th>site_id</th><th>domain</th><th>启用</th><th>最近状态</th><th>最近成功</th><th>最近错误</th><th>baseline</th></tr>
+        </thead>
+        <tbody><tr><td colspan="7" class="muted">加载中...</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>运行历史</h2>
+    <div class="table-wrap">
+      <table id="runs-table">
+        <thead>
+          <tr><th>run_id</th><th>开始时间</th><th>状态</th><th>成功/部分/失败</th><th>新增URL</th></tr>
+        </thead>
+        <tbody><tr><td colspan="5" class="muted">加载中...</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <p class="muted">本地专用面板，仅监听 127.0.0.1，不对局域网或公网开放。</p>
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>
