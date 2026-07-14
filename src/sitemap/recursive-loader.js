@@ -95,6 +95,7 @@ export async function loadSitemapsRecursively({ entryPoints, limits, fetchImpl }
         compressed: fetchResult.compressed,
         errorCode: fetchResult.errorCode,
         errorMessage: fetchResult.errorMessage,
+        attempts: fetchResult.attempts,
       });
       errors.push({ url: normalized, code: fetchResult.errorCode, message: fetchResult.errorMessage });
       return;
@@ -112,6 +113,7 @@ export async function loadSitemapsRecursively({ entryPoints, limits, fetchImpl }
         type: 'unknown',
         errorCode: code,
         errorMessage: err.message,
+        attempts: fetchResult.attempts,
       });
       errors.push({ url: normalized, code, message: err.message });
       return;
@@ -125,6 +127,7 @@ export async function loadSitemapsRecursively({ entryPoints, limits, fetchImpl }
         compressed: fetchResult.compressed,
         type: parsed.type,
         locationCount: parsed.locations.length,
+        attempts: fetchResult.attempts,
       }),
     );
     for (const w of parsed.warnings) warnings.push(`${normalized}: ${w}`);
@@ -208,6 +211,9 @@ function makeEndpoint(item, fields) {
     locationCount: fields.locationCount ?? 0,
     errorCode: fields.errorCode ?? null,
     errorMessage: fields.errorMessage ?? null,
+    // fetchSitemap() 内部本来就统计了这个 URL 总共尝试了几次（1 = 一次成功，
+    // >1 = 发生过重试）；这里只是把已有的数据透传出来，不新增任何重试逻辑。
+    attempts: fields.attempts ?? null,
   };
 }
 

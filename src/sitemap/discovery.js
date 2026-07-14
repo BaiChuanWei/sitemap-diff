@@ -1,4 +1,5 @@
 import { fetchSitemap } from './fetcher.js';
+import { parseSitemapXml } from './parser.js';
 import { DEFAULT_LIMITS } from './limits.js';
 
 const SITEMAP_DIRECTIVE = /^\s*sitemap\s*:\s*(\S+)\s*$/i;
@@ -67,12 +68,27 @@ export async function discoverSitemaps({ baseUrl, manualSitemapUrl, limits, fetc
     }
 
     if (sitemaps.length === 0) {
+      // 常见路径是纯猜测，不像手工配置或 robots.txt 声明那样代表"已确认存在"。
+      // 猜错的路径（404，或 200 但内容根本不是合法 Sitemap）必须静默跳过，
+      // 不能冒充"发现结果"往下传——否则 recursive-loader 会把这些必然失败的
+      // 候选当成真实 Endpoint 失败，把明明完整、正常的站点拖成 partial
+      // （真实案例：coolmathgames.com 只有 /sitemap.xml 存在，另外两个猜测
+      // 路径 404；brainrot-games.io 的猜测路径返回 200 但 Content-Length:0）。
       for (const path of effectiveLimits.COMMON_SITEMAP_PATHS) {
+        let candidateUrl;
         try {
-          add(new URL(path, baseUrl).toString(), 'common-path');
+          candidateUrl = new URL(path, baseUrl).toString();
         } catch {
-          // 理论上不会发生：path 是内置常量、baseUrl 已验证过
+          continue; // 理论上不会发生：path 是内置常量、baseUrl 已验证过
         }
+        const probe = await fetchSitemap(candidateUrl, { limits: effectiveLimits, fetchImpl });
+        if (!probe.ok) continue;
+        try {
+          parseSitemapXml(probe.text);
+        } catch {
+          continue;
+        }
+        add(candidateUrl, 'common-path');
       }
     }
   }
