@@ -1037,6 +1037,29 @@ async function renderRunReportBlock(runId) {
       li.append(a);
       list.append(li);
     }
+
+    // AI 审查包：正式文件始终留在 output/<date>/<run_id>/ai-review-package.zip
+    // ——这里的"下载一个副本"只是浏览器另存了一份，不是唯一保存方式；
+    // "复制文件路径"复制的就是页面上展示的这个项目内相对路径。
+    const pkg = report.aiReviewPackage;
+    document.getElementById('ai-review-package-path').textContent = pkg.relativePath;
+    const copyStatus = document.getElementById('ai-review-package-copy-status');
+    copyStatus.hidden = true;
+    document.getElementById('btn-copy-ai-review-path').onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(pkg.relativePath);
+        copyStatus.hidden = false;
+        copyStatus.className = 'form-success';
+        copyStatus.textContent = '已复制到剪贴板。';
+      } catch (err) {
+        copyStatus.hidden = false;
+        copyStatus.className = 'form-error';
+        copyStatus.textContent = `复制失败：${err.message}`;
+      }
+    };
+    const downloadLink = document.getElementById('btn-download-ai-review-copy');
+    downloadLink.href = `/api/runs/${encodeURIComponent(runId)}/report/${encodeURIComponent(pkg.filename)}`;
+    downloadLink.setAttribute('download', pkg.filename);
   } catch {
     // 运行被取消、还没跑到报告阶段（REPORT_NOT_READY）等情况：不展示报告区块，
     // 不当成错误提示给用户——本来就没有报告可看。

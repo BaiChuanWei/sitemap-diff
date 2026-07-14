@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDb } from '../../src/db/index.js';
@@ -8,6 +8,7 @@ import { persistCompleteSiteResult, createCrawlRun, finishCrawlRun } from '../..
 import { classifyRun } from '../../src/classify/runner.js';
 import { generateReport } from '../../src/report/report.js';
 import { extractPageMeta } from '../../src/classify/page-meta.js';
+import { readZipEntries } from '../helpers/zip-reader.js';
 
 function completeResult(siteId, pageUrls, overrides = {}) {
   return {
@@ -178,6 +179,45 @@ test('report.md 含 run_id/时间/统计/输出路径', async () => {
     assert.ok(md.includes(runId));
     assert.ok(md.includes('game：'));
     assert.ok(md.includes('new-urls.csv'));
+  });
+});
+
+test('AI审查包：正式落盘在 run 目录，原子覆盖不留临时文件，只含报告文件、不含库/配置/日志', async () => {
+  await withTempDb(async (db, outDir) => {
+    const runId = await setupRun(db, { addedUrls: ['https://poki.com/g/hero-quest'], fetchPagesFn: mixedFetch });
+
+    const first = generateReport(db, { runId, outputDir: outDir });
+    assert.ok(first.files.aiReviewPackageZip.endsWith('ai-review-package.zip'));
+    assert.ok(existsSync(first.files.aiReviewPackageZip), '正式 zip 必须落盘在 run 目录');
+    assert.equal(first.files.aiReviewPackageZip, join(first.dir, 'ai-review-package.zip'), 'zip 必须和其它报告文件同目录');
+    assert.equal(first.aiReviewPackageRelativePath, `output/${first.date}/${runId}/ai-review-package.zip`);
+
+    const zipBuf1 = readFileSync(first.files.aiReviewPackageZip);
+    const entries1 = readZipEntries(zipBuf1);
+    const names = entries1.map((e) => e.name).sort();
+    assert.deepEqual(
+      names,
+      [
+        'changes.json', 'consecutive-missing-urls.csv', 'missing-urls.csv', 'new-games.csv',
+        'new-urls.csv', 'new-urls.json', 'report.md', 'restored-urls.csv', 'unknown-urls.csv',
+      ],
+      'zip 内必须只有报告文件，不能出现数据库/配置/日志文件',
+    );
+
+    // 重复生成（幂等）：原子改名后不应该留下任何 .tmp 临时文件，且解包内容一致。
+    const second = generateReport(db, { runId, outputDir: outDir });
+    const dirFiles = readdirSync(second.dir);
+    assert.ok(dirFiles.every((f) => !f.includes('.tmp-')), `重复生成后不应残留临时文件: ${dirFiles.join(', ')}`);
+
+    const zipBuf2 = readFileSync(second.files.aiReviewPackageZip);
+    const entries2 = readZipEntries(zipBuf2);
+    const byName1 = Object.fromEntries(entries1.map((e) => [e.name, e.data.toString('utf-8')]));
+    const byName2 = Object.fromEntries(entries2.map((e) => [e.name, e.data.toString('utf-8')]));
+    assert.deepEqual(byName2, byName1, '重复生成后 zip 内每个文件的内容必须和上一次完全一致');
+
+    // report.md 本身也打包进了 zip，且和磁盘上单独的 report.md 内容一致。
+    const reportMdOnDisk = readFileSync(second.files.reportMd, 'utf-8');
+    assert.equal(byName2['report.md'], reportMdOnDisk);
   });
 });
 

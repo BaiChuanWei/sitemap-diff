@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadLocalConfig } from '../../src/config.js';
 import { createAndListenDashboard } from './helpers/listen-with-retry.js';
+import { readZipEntries } from '../helpers/zip-reader.js';
 
 /**
  * Dashboard M4：DB / API / 报告三层的 missing/consecutive_missing/restored
@@ -133,6 +134,22 @@ test('DB / API / 报告三层的 missing 计数必须一致', async () => {
     assert.equal(reportMeta.body.data.stats.restoredTotal, 0);
     assert.equal(reportMeta.body.data.files.missingUrlsCsv, 'missing-urls.csv');
     assert.equal(reportMeta.body.data.files.changesJson, 'changes.json');
+
+    // ---- AI 审查包：正式落盘在项目 output 目录内，API 只是暴露相对路径 + 提供下载副本 ----
+    assert.equal(reportMeta.body.data.aiReviewPackage.filename, 'ai-review-package.zip');
+    assert.equal(reportMeta.body.data.files.aiReviewPackageZip, 'ai-review-package.zip');
+    assert.match(
+      reportMeta.body.data.aiReviewPackage.relativePath,
+      new RegExp(`^output/\\d{4}-\\d{2}-\\d{2}/${runId2}/ai-review-package\\.zip$`),
+    );
+    const zipRes = await fetch(`http://127.0.0.1:${port}/api/runs/${runId2}/report/ai-review-package.zip`, { headers: { host: `127.0.0.1:${port}` } });
+    assert.equal(zipRes.status, 200);
+    assert.match(zipRes.headers.get('content-type'), /application\/zip/);
+    const zipBuf = Buffer.from(await zipRes.arrayBuffer());
+    const zipEntries = readZipEntries(zipBuf);
+    const missingCsvEntry = zipEntries.find((e) => e.name === 'missing-urls.csv');
+    assert.ok(missingCsvEntry, 'zip 内必须包含 missing-urls.csv');
+    assert.match(missingCsvEntry.data.toString('utf-8'), /https:\/\/poki\.com\/g\/c/);
 
     const csvRes = await fetch(`http://127.0.0.1:${port}/api/runs/${runId2}/report/missing-urls.csv`, { headers: { host: `127.0.0.1:${port}` } });
     const csvText = await csvRes.text();

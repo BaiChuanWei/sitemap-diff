@@ -9,12 +9,14 @@ const MAX_PAGE_SIZE = 200;
 const REPORT_FILE_BASENAMES = new Set([
   'new-urls.csv', 'new-urls.json', 'new-games.csv', 'unknown-urls.csv', 'report.md',
   'missing-urls.csv', 'consecutive-missing-urls.csv', 'restored-urls.csv', 'changes.json',
+  'ai-review-package.zip',
 ]);
 const CHANGE_TYPES = new Set(['added', 'missing', 'consecutive_missing', 'restored']);
 const CONTENT_TYPES = {
   '.csv': 'text/csv; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.md': 'text/markdown; charset=utf-8',
+  '.zip': 'application/zip',
 };
 
 /** GET /api/runs/active */
@@ -134,6 +136,12 @@ export function getRunReportRoute(db, config, runController, runId) {
     dir: report.dir,
     files: Object.fromEntries(Object.entries(report.files).map(([key, path]) => [key, basename(path)])),
     stats: report.stats,
+    // AI 审查包：正式落盘在这个 run 自己的报告目录（不是浏览器临时下载），
+    // relativePath 只是给用户看/复制的展示字符串，见 report.js 的说明。
+    aiReviewPackage: {
+      filename: basename(report.files.aiReviewPackageZip),
+      relativePath: report.aiReviewPackageRelativePath,
+    },
   };
 }
 

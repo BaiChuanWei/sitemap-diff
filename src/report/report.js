@@ -1,6 +1,8 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { toCsv } from './csv.js';
+import { createZipBuffer } from './zip.js';
 
 /**
  * 为某次运行生成本地报告到 output/YYYY-MM-DD/<run_id>/：
@@ -82,35 +84,40 @@ export function generateReport(db, { runId, outputDir, now } = {}) {
     consecutiveMissingUrlsCsv: join(dir, 'consecutive-missing-urls.csv'),
     restoredUrlsCsv: join(dir, 'restored-urls.csv'),
     changesJson: join(dir, 'changes.json'),
+    aiReviewPackageZip: join(dir, 'ai-review-package.zip'),
   };
 
-  writeFileSync(files.newUrlsCsv, toCsv(CSV_HEADERS, rows), 'utf-8');
-  writeFileSync(files.newGamesCsv, toCsv(CSV_HEADERS, games), 'utf-8');
-  writeFileSync(files.unknownUrlsCsv, toCsv(CSV_HEADERS, unknowns), 'utf-8');
-  writeFileSync(files.missingUrlsCsv, toCsv(CHANGE_CSV_HEADERS, missingRows), 'utf-8');
-  writeFileSync(files.consecutiveMissingUrlsCsv, toCsv(CHANGE_CSV_HEADERS, consecutiveMissingRows), 'utf-8');
-  writeFileSync(files.restoredUrlsCsv, toCsv(CHANGE_CSV_HEADERS, restoredRows), 'utf-8');
+  const newUrlsCsvText = toCsv(CSV_HEADERS, rows);
+  const newGamesCsvText = toCsv(CSV_HEADERS, games);
+  const unknownUrlsCsvText = toCsv(CSV_HEADERS, unknowns);
+  const missingUrlsCsvText = toCsv(CHANGE_CSV_HEADERS, missingRows);
+  const consecutiveMissingUrlsCsvText = toCsv(CHANGE_CSV_HEADERS, consecutiveMissingRows);
+  const restoredUrlsCsvText = toCsv(CHANGE_CSV_HEADERS, restoredRows);
+  writeFileSync(files.newUrlsCsv, newUrlsCsvText, 'utf-8');
+  writeFileSync(files.newGamesCsv, newGamesCsvText, 'utf-8');
+  writeFileSync(files.unknownUrlsCsv, unknownUrlsCsvText, 'utf-8');
+  writeFileSync(files.missingUrlsCsv, missingUrlsCsvText, 'utf-8');
+  writeFileSync(files.consecutiveMissingUrlsCsv, consecutiveMissingUrlsCsvText, 'utf-8');
+  writeFileSync(files.restoredUrlsCsv, restoredUrlsCsvText, 'utf-8');
 
   const jsonRows = rows.map((r) => ({ ...r, evidence: safeParse(r.evidence) }));
-  writeFileSync(files.newUrlsJson, JSON.stringify({ runId, date, count: rows.length, urls: jsonRows }, null, 2), 'utf-8');
-  writeFileSync(
-    files.changesJson,
-    JSON.stringify(
-      {
-        runId,
-        date,
-        // 明确说明：missing / consecutiveMissing 不代表页面被永久删除，只表示
-        // 本次可靠采集结果里暂时没有发现该 URL，见 report.md 的对应提示。
-        added: jsonRows,
-        missing: missingRows,
-        consecutiveMissing: consecutiveMissingRows,
-        restored: restoredRows,
-      },
-      null,
-      2,
-    ),
-    'utf-8',
+  const newUrlsJsonText = JSON.stringify({ runId, date, count: rows.length, urls: jsonRows }, null, 2);
+  writeFileSync(files.newUrlsJson, newUrlsJsonText, 'utf-8');
+  const changesJsonText = JSON.stringify(
+    {
+      runId,
+      date,
+      // 明确说明：missing / consecutiveMissing 不代表页面被永久删除，只表示
+      // 本次可靠采集结果里暂时没有发现该 URL，见 report.md 的对应提示。
+      added: jsonRows,
+      missing: missingRows,
+      consecutiveMissing: consecutiveMissingRows,
+      restored: restoredRows,
+    },
+    null,
+    2,
   );
+  writeFileSync(files.changesJson, changesJsonText, 'utf-8');
 
   const stats = {
     runId,
@@ -132,9 +139,44 @@ export function generateReport(db, { runId, outputDir, now } = {}) {
     restoredTotal: restoredRows.length,
   };
 
-  writeFileSync(files.reportMd, buildMarkdown(stats, siteRuns, files, dir), 'utf-8');
+  const reportMdText = buildMarkdown(stats, siteRuns, files, dir);
+  writeFileSync(files.reportMd, reportMdText, 'utf-8');
 
-  return { runId, date, dir, files, stats };
+  // AI 审查包：把这次运行的全部报告文件（不含数据库/配置文件/日志——那些
+  // 本来就不在报告目录里）打成一个 zip，正式落盘在这个 run 自己的报告
+  // 目录下（不是临时浏览器下载文件）。先写临时文件、再原子改名——避免
+  // 任何读者在写入过程中读到一个不完整的 zip；同一个 run 重复生成报告
+  // （本函数整体是幂等的）时，原子改名会安全覆盖旧 zip，不会有中间态。
+  const zipBuffer = createZipBuffer(
+    [
+      { name: 'new-urls.csv', data: newUrlsCsvText },
+      { name: 'new-urls.json', data: newUrlsJsonText },
+      { name: 'new-games.csv', data: newGamesCsvText },
+      { name: 'unknown-urls.csv', data: unknownUrlsCsvText },
+      { name: 'missing-urls.csv', data: missingUrlsCsvText },
+      { name: 'consecutive-missing-urls.csv', data: consecutiveMissingUrlsCsvText },
+      { name: 'restored-urls.csv', data: restoredUrlsCsvText },
+      { name: 'changes.json', data: changesJsonText },
+      { name: 'report.md', data: reportMdText },
+    ],
+    { now: now ? new Date(now()) : new Date() },
+  );
+  const tmpZipPath = join(dir, `.ai-review-package.zip.tmp-${randomUUID()}`);
+  writeFileSync(tmpZipPath, zipBuffer);
+  renameSync(tmpZipPath, files.aiReviewPackageZip);
+
+  return {
+    runId,
+    date,
+    dir,
+    files,
+    stats,
+    // 项目内相对路径展示用——固定用正斜杠拼接，不用 path.join：Windows 上
+    // path.join 会产出反斜杠路径，而这里只是给用户看/复制的展示字符串，
+    // 不是实际文件系统操作用的路径，统一正斜杠更符合"项目内相对路径"的
+    // 展示惯例，也避免这条文本本身在不同平台上不一致。
+    aiReviewPackageRelativePath: `output/${date}/${runId}/ai-review-package.zip`,
+  };
 }
 
 function buildMarkdown(stats, siteRuns, files, dir) {
@@ -198,6 +240,7 @@ ${perSite || '| （无站点级记录） | | | | | |'}
 - \`${files.restoredUrlsCsv}\`
 - \`${files.changesJson}\`
 - \`${files.reportMd}\`
+- \`${files.aiReviewPackageZip}\`（AI 审查包：以上报告文件打包的 zip，不含数据库/配置/日志）
 
 > 目录：\`${dir}\`
 `;
