@@ -214,6 +214,49 @@ test('网络: 响应体超过大小限制会返回 RESPONSE_TOO_LARGE', async ()
   }
 });
 
+test('网络: 读取响应体时的瞬时流终止错误应重试且不应被误判为 RESPONSE_TOO_LARGE', async () => {
+  // 复现 101 站验证中 mathgames.com 出现的真实问题：底层 fetch 实现在读取响应体
+  // 途中因连接被提前关闭而抛出一个不带 .code 的通用错误（真实场景里 undici 会
+  // 抛出 message 为 "terminated" 的 TypeError），这与 readBodyWithLimit() 自己
+  // 因为超过大小限制主动抛出的 SitemapFetchError(RESPONSE_TOO_LARGE) 是完全不同
+  // 的两类问题，前者应该像其他网络错误一样重试，不应该被永久误判为"响应过大"。
+  let attemptCount = 0;
+  const fetchImpl = async () => {
+    attemptCount++;
+    const isFirstAttempt = attemptCount === 1;
+    const body = Buffer.from(XML_BODY);
+    let readCalls = 0;
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: (name) => (name === 'content-type' ? 'text/xml' : null) },
+      body: {
+        getReader: () => ({
+          read: async () => {
+            readCalls++;
+            if (isFirstAttempt && readCalls === 1) {
+              throw new TypeError('terminated');
+            }
+            if (readCalls === 1) return { done: false, value: body };
+            return { done: true, value: undefined };
+          },
+          cancel: async () => {},
+        }),
+      },
+    };
+  };
+
+  const result = await fetchSitemap('https://example-games.test/sitemap.xml', {
+    limits: fastLimits({ MAX_RETRIES: 2 }),
+    sleep: noSleep,
+    fetchImpl,
+  });
+  assert.equal(result.ok, true, '瞬时流错误应该在重试后成功');
+  assert.equal(result.text, XML_BODY);
+  assert.equal(attemptCount, 2, '应该恰好重试了一次');
+  assert.notEqual(result.errorCode, FETCH_ERROR_CODES.RESPONSE_TOO_LARGE);
+});
+
 test('正常路径：200 + 明文 XML 一次成功，attempts 为 1', async () => {
   const { url, close } = await startTestServer((req, res) => {
     res.writeHead(200, { 'content-type': 'application/xml' });

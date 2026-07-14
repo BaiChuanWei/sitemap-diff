@@ -56,15 +56,29 @@ export async function fetchSitemap(url, options = {}) {
       try {
         raw = await readBodyWithLimit(response, limits.MAX_DOWNLOAD_BYTES);
       } catch (err) {
-        return buildResult({
-          ok: false,
-          attempts,
-          finalUrl,
-          httpStatus: response.status,
-          contentType,
-          errorCode: err.code || FETCH_ERROR_CODES.RESPONSE_TOO_LARGE,
-          errorMessage: err.message,
-        });
+        // 只有 readBodyWithLimit 自己因为超过大小限制主动抛出的
+        // SitemapFetchError 才是真正的"响应过大"，不可重试。其他任何错误
+        // （例如连接在读取响应体途中被提前关闭）都是瞬时网络问题，应该像
+        // 别的网络错误一样走退避重试，而不是被当成"响应过大"直接判死。
+        if (err instanceof SitemapFetchError) {
+          clearTimeout(timer);
+          return buildResult({
+            ok: false,
+            attempts,
+            finalUrl,
+            httpStatus: response.status,
+            contentType,
+            errorCode: err.code,
+            errorMessage: err.message,
+          });
+        }
+        clearTimeout(timer);
+        lastFailure = { errorCode: FETCH_ERROR_CODES.NETWORK_ERROR, errorMessage: err.message, httpStatus: response.status, contentType };
+        if (attempt < limits.MAX_RETRIES) {
+          await sleep(backoffDelayMs(attempt, limits));
+          continue;
+        }
+        return buildResult({ ok: false, attempts, finalUrl, ...lastFailure });
       }
 
       // 判断是否需要解压只看文件头魔数（1f 8b），不信任 URL 后缀或响应头——
