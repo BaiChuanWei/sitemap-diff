@@ -8,32 +8,32 @@ itch,itch.io,high,true,https://itch.io/robots.txt,,,分组:B(M5阶段3 2026-07-1
 miniclip,miniclip.com,high,true,https://miniclip.com/robots.txt,,/games/,分组:A(M5阶段4 2026-07-14实测确认：robots.txt声明1个Sitemap Endpoint，仅65个页面URL，规模远小于预期的大型门户，success/complete=true但疑似只是站点声明的一小部分内容，建议后续人工核实是否有其他未声明的Sitemap)；两轮验证added=0无虚假新增,A
 4399,4399.com,high,true,https://4399.com/robots.txt,,,分组:E(M5阶段4 2026-07-14实测确认：robots.txt未声明Sitemap，3个discovery常见路径候选全部404，status=failed，当前无法自动发现有效Sitemap，与amzgame.com同类限制，需要人工提供sitemap_url才能支持)；两轮验证均正确隔离该站失败未影响其余19站,E
 7k7k,7k7k.com,high,true,https://7k7k.com/robots.txt,,,分组:E；robots.txt未声明Sitemap，依赖discovery常见路径探测,E
-a10,a10.com,high,true,https://a10.com/robots.txt,,,分组:E,E
-addictinggames,addictinggames.com,high,true,https://addictinggames.com/robots.txt,,,分组:E；robots.txt未声明Sitemap，依赖discovery常见路径探测,E
+a10,a10.com,high,true,https://a10.com/robots.txt,,,M5阶段5 2026-07-14实测确认：robots.txt未声明Sitemap，discovery常见路径候选全部返回403，两轮均status=failed(NO_SITEMAP_DISCOVERED)，当前无法自动发现，需要人工提供sitemap_url才能支持,G
+addictinggames,addictinggames.com,high,true,https://addictinggames.com/robots.txt,,,M5阶段5 2026-07-14实测确认：1个Sitemap Endpoint，普通urlset，7106个页面URL，两轮均success/complete=true,A
 agame,agame.com,high,true,https://agame.com/robots.txt,,,分组:E(M5阶段4 2026-07-14实测确认：robots.txt和全部3个常见路径候选都被重定向到首页HTML而非XML，status=failed，当前无法自动发现有效Sitemap，需要人工提供sitemap_url才能支持)；两轮验证均正确隔离该站失败未影响其余19站,E
 gamejolt,gamejolt.com,high,true,https://gamejolt.com/robots.txt,,,分组:E；robots.txt未声明Sitemap，依赖discovery常见路径探测,E
 gamesgames,gamesgames.com,high,true,https://gamesgames.com/robots.txt,,,分组:E；robots.txt未声明Sitemap，依赖discovery常见路径探测,E
-kizi,kizi.com,high,true,https://kizi.com/robots.txt,,,分组:E,E
+kizi,kizi.com,high,true,https://kizi.com/robots.txt,,,M5阶段5 2026-07-14实测确认：3个Sitemap Endpoint，Sitemap Index结构，6087个页面URL，两轮均success/complete=true,B
 kongregate,kongregate.com,high,true,https://kongregate.com/robots.txt,,,分组:E(M5阶段4 2026-07-14实测确认：robots.txt声明4个Sitemap Endpoint均真实存在，但单个文件都超过当前MAX_DOWNLOAD_BYTES=20MB全局限制被拒绝，status=partial，页面URL数为0，需要证据驱动的站点级覆盖配置才能支持，本阶段不做全局限制调整)；两轮结果一致，未污染历史,E
 poki,poki.com,high,true,https://poki.com/robots.txt,,/g/,分组:B(M5阶段2 2026-07-13实测确认：137个Sitemap Endpoint，Sitemap Index结构，55024个页面URL，属大型站兼E类)；complete=true/truncated=false，两轮验证added=0无虚假新增,B
-twoplayergames,twoplayergames.org,high,true,https://twoplayergames.org/robots.txt,,,分组:E,E
-minijuegos,minijuegos.com,high,true,https://minijuegos.com/robots.txt,,,分组:F；curl验证时首页返回403，需确认真实抓取行为,F
-silvergames,silvergames.com,high,true,https://silvergames.com/robots.txt,,,分组:F；curl验证时首页返回403，需确认真实抓取行为；robots.txt未声明Sitemap，依赖discovery常见路径探测,F
+twoplayergames,twoplayergames.org,high,true,https://twoplayergames.org/robots.txt,,,M5阶段5 2026-07-14实测确认：3个Sitemap Endpoint，Sitemap Index结构，2699个页面URL，两轮均success/complete=true,B
+minijuegos,minijuegos.com,high,true,https://minijuegos.com/robots.txt,,,M5阶段5 2026-07-14实测确认：5个Sitemap Endpoint，Sitemap Index结构，27239个页面URL，两轮均success/complete=true；此前curl直接访问首页曾遇403，但项目采集器实测正常，纠正分组F→B,B
+silvergames,silvergames.com,high,true,https://silvergames.com/robots.txt,,,M5阶段5 2026-07-14实测确认：robots.txt未声明Sitemap，discovery常见路径候选也全部不可用，两轮均status=failed(NO_SITEMAP_DISCOVERED)，当前不支持,F
 1001games,1001games.com,medium,true,https://1001games.com/robots.txt,,,分组:G,G
 4j,4j.com,medium,true,https://4j.com/robots.txt,,,分组:G；robots.txt未声明Sitemap，依赖discovery常见路径探测,G
-abcya,abcya.com,medium,true,https://abcya.com/robots.txt,,,分组:G,G
+abcya,abcya.com,medium,true,https://abcya.com/robots.txt,,,M5阶段5 2026-07-14实测确认：3个Sitemap Endpoint，Sitemap Index结构，588个页面URL，两轮均success/complete=true,B
 amzgame,amzgame.com,medium,true,https://amzgame.com/robots.txt,,,分组:G；实测robots.txt和/sitemap.xml均返回HTTP 200但内容为空(Content-Length:0)，discovery常见路径探测也拿不到内容，当前无法自动发现Sitemap，需人工确认该站真实Sitemap路径后手工填入sitemap_url,G
-animalbrainrot,animalbrainrot.com,medium,true,https://animalbrainrot.com/robots.txt,,,分组:G,G
+animalbrainrot,animalbrainrot.com,medium,true,https://animalbrainrot.com/robots.txt,,,M5阶段5 2026-07-14实测确认：robots.txt声明的Sitemap真实存在但请求返回403，两轮均status=failed，与armorgames同类，两轮验证均未影响其余站点,F
 azgames,azgames.my,medium,true,https://azgames.my/robots.txt,,,分组:G(M5阶段4 2026-07-14实测确认：robots.txt未声明Sitemap，3个discovery常见路径候选全部404，status=failed，当前无法自动发现有效Sitemap，需要人工提供sitemap_url才能支持)；两轮验证均正确隔离该站失败未影响其余19站,G
 basketrandom,basketrandom.io,medium,true,https://basketrandom.io/robots.txt,,,分组:A(M5阶段4 2026-07-14实测确认：1个Sitemap Endpoint，普通urlset，3014个页面URL，success/complete=true，首次建立baseline)；两轮验证added=0无虚假新增,A
 bestgames,bestgames.com,medium,true,https://bestgames.com/robots.txt,,,分组:G,G
 brainrot_games,brainrot-games.io,medium,true,https://brainrot-games.io/robots.txt,,,分组:A(M5阶段3 2026-07-13实测确认：discovery常见路径探测中只有/sitemap.xml真实存在，1个Sitemap Endpoint，普通urlset，305个页面URL；另两个猜测路径返回200但Content-Length:0，已在discovery.js修复后不再算作失败Endpoint)；complete=true/truncated=false，两轮验证added=0,A
 coolgames,coolgames.com,medium,true,https://coolgames.com/robots.txt,,,分组:G,G
 coolmath4kids,coolmath4kids.com,medium,true,https://coolmath4kids.com/robots.txt,,,分组:G；robots.txt未声明Sitemap，依赖discovery常见路径探测,G
-crazygamesplay,crazygamesplay.com,medium,true,https://crazygamesplay.com/robots.txt,,,分组:G,G
-dinogame,dinogame.gg,medium,true,https://dinogame.gg/robots.txt,,,分组:G,G
+crazygamesplay,crazygamesplay.com,medium,true,https://crazygamesplay.com/robots.txt,,,M5阶段5 2026-07-14实测确认：1个Sitemap Endpoint，普通urlset，仅1个页面URL（规模很小），两轮均success/complete=true,A
+dinogame,dinogame.gg,medium,true,https://dinogame.gg/robots.txt,,,M5阶段5 2026-07-14实测确认：6个Sitemap Endpoint，Sitemap Index结构，1070个页面URL，两轮均success/complete=true,B
 easegame,easegame.com,medium,true,https://easegame.com/robots.txt,,,分组:G,G
-famobi,famobi.com,medium,true,https://famobi.com/robots.txt,,,分组:G,G
+famobi,famobi.com,medium,true,https://famobi.com/robots.txt,,,M5阶段5 2026-07-14实测确认：1个Sitemap Endpoint，普通urlset，1123个页面URL，两轮均success/complete=true,A
 fastplaygames,fastplaygames.com,medium,true,https://fastplaygames.com/robots.txt,,,分组:G,G
 flipline,flipline.com,medium,true,https://flipline.com/robots.txt,,,分组:G；robots.txt未声明Sitemap，依赖discovery常见路径探测,G
 flyordie,flyordie.com,medium,true,https://flyordie.com/robots.txt,,,分组:G；robots.txt未声明Sitemap，依赖discovery常见路径探测,G
@@ -45,58 +45,58 @@ funnygames,funnygames.org,medium,true,https://funnygames.org/robots.txt,,,分组
 gahe,gahe.com,medium,true,https://gahe.com/robots.txt,,,分组:G(M5阶段4 2026-07-14实测确认：该站robots.txt自身配置错误，声明的Sitemap地址是内部开发地址http://localhost:1126/...，我方正确重试后仍连接失败，status=partial，属站点自身数据质量问题非本项目bug，当前无法支持)；两轮验证均正确隔离该站失败未影响其余19站,G
 gamaverse,gamaverse.com,medium,true,https://gamaverse.com/robots.txt,,,分组:G；robots.txt未声明Sitemap，依赖discovery常见路径探测,G
 gameforge,gameforge.com,medium,true,https://gameforge.com/robots.txt,,,分组:G,G
-gamepix,gamepix.com,medium,true,https://gamepix.com/robots.txt,,,分组:G,G
+gamepix,gamepix.com,medium,true,https://gamepix.com/robots.txt,,,M5阶段5 2026-07-14实测：110个Sitemap Endpoint，Sitemap Index结构（robots.txt声明10个语言版本子Sitemap），187576个页面URL；第一轮在50站并发压力下曾短暂失败(NO_SITEMAP_DISCOVERED)，独立复测和第二轮均success/complete=true，判断为瞬时网络问题非代码bug，isBaseline=true于第二轮正确建立,B
 gamesbx,gamesbx.com,medium,true,https://gamesbx.com/robots.txt,,,分组:G；robots.txt未声明Sitemap，依赖discovery常见路径探测,G
 gamesfreak,gamesfreak.net,medium,true,https://gamesfreak.net/robots.txt,,,分组:G；robots.txt未声明Sitemap，依赖discovery常见路径探测,G
 gamesnacks,gamesnacks.com,medium,true,https://gamesnacks.com/robots.txt,,,分组:G,G
 gamessumo,gamessumo.com,medium,true,https://gamessumo.com/robots.txt,,,分组:G；robots.txt未声明Sitemap，依赖discovery常见路径探测,G
-gamewolf,gamewolf.games,medium,true,https://gamewolf.games/robots.txt,,,分组:G,G
-gamezipper,gamezipper.com,medium,true,https://gamezipper.com/robots.txt,,,分组:G,G
+gamewolf,gamewolf.games,medium,true,https://gamewolf.games/robots.txt,,,M5阶段5 2026-07-14实测确认：1个Sitemap Endpoint，普通urlset，613个页面URL，两轮均success/complete=true,A
+gamezipper,gamezipper.com,medium,true,https://gamezipper.com/robots.txt,,,M5阶段5 2026-07-14实测确认：1个Sitemap Endpoint，普通urlset，1004个页面URL，两轮均success/complete=true,A
 girlgames,girlgames.space,medium,true,https://girlgames.space/robots.txt,,,分组:G；robots.txt未声明Sitemap，依赖discovery常见路径探测,G
 girlgames_2,girlgames.com,medium,true,https://girlgames.com/robots.txt,,,分组:G,G
 girlgogames,girlgogames.org,medium,true,https://girlgogames.org/robots.txt,,,分组:G,G
 gogy,gogy.com,medium,true,https://gogy.com/robots.txt,,,分组:A(M5阶段3 2026-07-13实测确认：discovery发现的Sitemap文件名虽叫sitemap/index.xml，但根元素实测是urlset而非sitemapindex，1个Sitemap Endpoint，3464个页面URL，文件名带index不代表结构是Index)；complete=true/truncated=false，两轮验证added=0,A
 hoodamath,hoodamath.com,medium,true,https://hoodamath.com/robots.txt,,,分组:G,G
-html5games,html5games.com,medium,true,https://html5games.com/robots.txt,,,分组:G,G
+html5games,html5games.com,medium,true,https://html5games.com/robots.txt,,,M5阶段5 2026-07-14实测：1个Sitemap Endpoint，status=success但页面URL为0；实测该站robots.txt声明的Sitemap实际由play.famobi.com代管，但返回内容是未渲染的Laravel模板代码(@yield('content'))而非真实URL列表，属站点自身服务端故障非本项目bug，当前无有效数据,G
 io_games,io-games.io,medium,true,https://io-games.io/robots.txt,,,分组:G；robots.txt未声明Sitemap，依赖discovery常见路径探测,G
 iogames,iogames.space,medium,true,https://iogames.space/robots.txt,,,分组:G,G
 iogames_2,iogames.games,medium,true,https://iogames.games/robots.txt,,,分组:G；robots.txt未声明Sitemap，依赖discovery常见路径探测,G
-iogamesonline,iogamesonline.com,medium,true,https://iogamesonline.com/robots.txt,,,分组:G,G
-juegos,juegos.com,medium,true,https://juegos.com/robots.txt,,,分组:G,G
+iogamesonline,iogamesonline.com,medium,true,https://iogamesonline.com/robots.txt,,,M5阶段5 2026-07-14实测确认：1个Sitemap Endpoint，普通urlset，仅1个页面URL（规模很小），两轮均success/complete=true,A
+juegos,juegos.com,medium,true,https://juegos.com/robots.txt,,,M5阶段5 2026-07-14实测确认：两轮均返回403（robots.txt和/或候选Sitemap均被拦截，两轮表现略有差异但结果一致为failed），当前不支持,F
 julgames,julgames.com,medium,true,https://julgames.com/robots.txt,,,分组:A(M5阶段4 2026-07-14实测确认：1个Sitemap Endpoint，普通urlset，但loc用根相对路径如"/privacy"不符合Sitemap协议规范；已在parser.js增加相对路径解析支持后正确恢复19个页面URL，success/complete=true，首次建立baseline)；两轮验证added=0无虚假新增,A
-kiz10,kiz10.com,medium,true,https://kiz10.com/robots.txt,,,分组:G,G
+kiz10,kiz10.com,medium,true,https://kiz10.com/robots.txt,,,M5阶段5 2026-07-14实测确认：1个Sitemap Endpoint，普通urlset，17289个页面URL，两轮均success/complete=true,A
 kizi1000,kizi1000.com,medium,true,https://kizi1000.com/robots.txt,,,分组:G；robots.txt未声明Sitemap，依赖discovery常见路径探测,G
-lagged,lagged.com,medium,true,https://lagged.com/robots.txt,,,分组:G,G
+lagged,lagged.com,medium,true,https://lagged.com/robots.txt,,,M5阶段5 2026-07-14实测确认：robots.txt声明的Sitemap地址(/sitemap.txt)两轮均返回406 Not Acceptable，独立curl(不带任何自定义请求头)同样406，判断为站点对自动化客户端的拦截，非本项目bug，当前不支持,F
 mathgames,mathgames.com,medium,true,https://mathgames.com/robots.txt,,,分组:G；robots.txt未声明Sitemap，依赖discovery常见路径探测,G
-mathplayground,mathplayground.com,medium,true,https://mathplayground.com/robots.txt,,,分组:G,G
+mathplayground,mathplayground.com,medium,true,https://mathplayground.com/robots.txt,,,M5阶段5 2026-07-14实测确认：1个Sitemap Endpoint，普通urlset，977个页面URL，两轮均success/complete=true,A
 miniplay,miniplay.com,medium,true,https://miniplay.com/robots.txt,,,分组:G,G
 mousebreaker,mousebreaker.com,medium,true,https://mousebreaker.com/robots.txt,,,分组:G；robots.txt未声明Sitemap，依赖discovery常见路径探测,G
 nitrome,nitrome.com,medium,true,https://nitrome.com/robots.txt,,,分组:G；robots.txt未声明Sitemap，依赖discovery常见路径探测,G
 onlinegames,onlinegames.io,medium,true,https://onlinegames.io/robots.txt,,,分组:G,G
-pacogames,pacogames.com,medium,true,https://pacogames.com/robots.txt,,,分组:G,G
-papas_games,papas-games.io,medium,true,https://papas-games.io/robots.txt,,,分组:G；robots.txt未声明Sitemap，依赖discovery常见路径探测,G
+pacogames,pacogames.com,medium,true,https://pacogames.com/robots.txt,,,M5阶段5 2026-07-14实测确认：68个Sitemap Endpoint，Sitemap Index结构，54321个页面URL，两轮均success/complete=true,B
+papas_games,papas-games.io,medium,true,https://papas-games.io/robots.txt,,,M5阶段5 2026-07-14实测确认：1个Sitemap Endpoint，普通urlset，1332个页面URL，两轮均success/complete=true,A
 pbskids,pbskids.org,medium,true,https://pbskids.org/robots.txt,,,分组:G；robots.txt未声明Sitemap，依赖discovery常见路径探测,G
-playagame,playagame.io,medium,true,https://playagame.io/robots.txt,,,分组:G,G
+playagame,playagame.io,medium,true,https://playagame.io/robots.txt,,,M5阶段5 2026-07-14实测确认：2个Sitemap Endpoint，同域名多Endpoint结构，50个页面URL，两轮均success/complete=true,B
 playbrain,playbrain.games,medium,true,https://playbrain.games/robots.txt,,,分组:G,G
 playgama,playgama.com,medium,true,https://playgama.com/robots.txt,,,分组:E(M5阶段4 2026-07-14实测确认：robots.txt声明23个Sitemap Endpoint，Sitemap Index结构，大部分成功抓到14677个页面URL，但其中3个以上单文件超过MAX_DOWNLOAD_BYTES=20MB被拒绝，status=partial，与kongregate同类限制，本阶段不做全局限制调整)；两轮结果一致，未污染历史,E
-playhop,playhop.com,medium,true,https://playhop.com/robots.txt,,,分组:G,G
+playhop,playhop.com,medium,true,https://playhop.com/robots.txt,,,M5阶段5 2026-07-14实测确认：Sitemap Index结构，达到MAX_SITEMAPS_PER_SITE=200 Endpoint上限，227278个页面URL，两轮均status=partial/truncated=true(MAX_SITEMAPS_ENDPOINTS)，属超大型站，与itch.io(页面URL上限)、kongregate/playgama(单文件大小上限)构成第三类真实大站限制场景，本阶段未调整全局限制,E
 playmath,playmath.org,medium,true,https://playmath.org/robots.txt,,,分组:G,G
 plays,plays.org,medium,true,https://plays.org/robots.txt,,,分组:G；robots.txt未声明Sitemap，依赖discovery常见路径探测,G
 primarygames,primarygames.com,medium,true,https://primarygames.com/robots.txt,,,分组:G,G
 shockwave,shockwave.com,medium,true,https://shockwave.com/robots.txt,,,分组:G,G
-spel,spel.nl,medium,true,https://spel.nl/robots.txt,,,分组:G,G
+spel,spel.nl,medium,true,https://spel.nl/robots.txt,,,M5阶段5 2026-07-14实测确认：两轮均返回403（robots.txt和/或候选Sitemap均被拦截），当前不支持,F
 spelletjes,spelletjes.nl,medium,true,https://spelletjes.nl/robots.txt,,,分组:G；robots.txt未声明Sitemap，依赖discovery常见路径探测,G
-startgamer,startgamer.net,medium,true,https://startgamer.net/robots.txt,,,分组:G,G
+startgamer,startgamer.net,medium,true,https://startgamer.net/robots.txt,,,M5阶段5 2026-07-14实测确认：1个Sitemap Endpoint，普通urlset，4604个页面URL，两轮均success/complete=true,A
 storytellergame,storytellergame.io,medium,true,https://storytellergame.io/robots.txt,,,分组:B(M5阶段3 2026-07-13实测确认：8个Sitemap Endpoint，Sitemap Index结构，2176个页面URL)；complete=true/truncated=false，两轮验证added=0无虚假新增,B
-titotu,titotu.io,medium,true,https://titotu.io/robots.txt,,,分组:G,G
-toytheater,toytheater.com,medium,true,https://toytheater.com/robots.txt,,,分组:G,G
-vseigru,vseigru.net,medium,true,https://vseigru.net/robots.txt,,,分组:G,G
+titotu,titotu.io,medium,true,https://titotu.io/robots.txt,,,M5阶段5 2026-07-14实测确认：1个Sitemap Endpoint，普通urlset，7053个页面URL，两轮均success/complete=true,A
+toytheater,toytheater.com,medium,true,https://toytheater.com/robots.txt,,,M5阶段5 2026-07-14实测确认：4个Sitemap Endpoint，Sitemap Index结构，620个页面URL，两轮均success/complete=true,B
+vseigru,vseigru.net,medium,true,https://vseigru.net/robots.txt,,,M5阶段5 2026-07-14实测确认：robots.txt声明的Sitemap地址(site-map.html?view=xml)独立curl验证也返回404，属站点自身声明过期/配置错误，非本项目bug，当前无法支持,G
 webgames,webgames.io,medium,true,https://webgames.io/robots.txt,,,分组:G；robots.txt未声明Sitemap，依赖discovery常见路径探测,G
 yad,yad.com,medium,true,https://yad.com/robots.txt,,,分组:G,G
 armorgames,armorgames.com,low,true,https://armorgames.com/robots.txt,,/play/,分组:F(M5阶段4 2026-07-14实测确认：robots.txt正确声明了Sitemap地址https://armorgames.com/sitemap，但实际请求返回403，status=failed，0个页面URL；两轮验证均确认该站失败未影响同批其余19个站，属正确的单站失败隔离，暂不计入生产可用站点),F
 freeonlinegames,freeonlinegames.com,low,true,https://freeonlinegames.com/robots.txt,,,分组:F；curl验证时首页返回403，需确认真实抓取行为；robots.txt未声明Sitemap，依赖discovery常见路径探测,F
 gameflare,gameflare.com,low,true,https://gameflare.com/robots.txt,,,分组:F；curl验证时首页返回403，需确认真实抓取行为；robots.txt未声明Sitemap，依赖discovery常见路径探测,F
-kbhgames,kbhgames.com,low,true,https://kbhgames.com/robots.txt,,,分组:F；curl验证时首页返回403，需确认真实抓取行为,F
+kbhgames,kbhgames.com,low,true,https://kbhgames.com/robots.txt,,,M5阶段5 2026-07-14实测确认：39个Sitemap Endpoint，Sitemap Index结构，32987个页面URL，两轮均success/complete=true；此前curl直接访问首页曾遇403，但项目采集器实测正常，纠正分组F→B,B
 newgrounds,newgrounds.com,low,true,https://newgrounds.com/robots.txt,,/portal/view/,分组:F(M5阶段3 2026-07-13实测确认：robots.txt和全部3个discovery常见路径候选均返回403，0个Sitemap Endpoint被发现，status=failed；两轮验证均确认该站失败未影响同批其余9个站，属正确的单站失败隔离，暂不计入生产可用站点),F
 speeleiland,speeleiland.nl,low,true,https://speeleiland.nl/robots.txt,,,分组:F；curl验证时首页返回403，需确认真实抓取行为；robots.txt未声明Sitemap，依赖discovery常见路径探测,F
 spelle,spelle.nl,low,true,https://spelle.nl/robots.txt,,,分组:F；curl验证时首页返回403，需确认真实抓取行为；robots.txt未声明Sitemap，依赖discovery常见路径探测,F
