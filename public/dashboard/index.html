@@ -9,41 +9,146 @@
 <body>
 <header class="topbar">
   <h1>Sitemap 监控面板</h1>
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="overview">总览</button>
+    <button class="tab-btn" data-tab="sites">站点管理</button>
+  </nav>
   <div class="conn-status" id="conn-status">连接中...</div>
 </header>
 
 <main>
-  <section class="panel">
-    <h2>总览</h2>
-    <div class="cards" id="overview-cards">
-      <p class="muted">加载中...</p>
-    </div>
-    <div class="notice" id="stale-run-notice" hidden></div>
+  <section id="tab-overview" class="tab-page">
+    <section class="panel">
+      <h2>总览</h2>
+      <div class="cards" id="overview-cards">
+        <p class="muted">加载中...</p>
+      </div>
+      <div class="notice" id="stale-run-notice" hidden></div>
+    </section>
+
+    <section class="panel">
+      <h2>运行历史</h2>
+      <div class="table-wrap">
+        <table id="runs-table">
+          <thead>
+            <tr><th>run_id</th><th>开始时间</th><th>状态</th><th>成功/部分/失败</th><th>新增URL</th></tr>
+          </thead>
+          <tbody><tr><td colspan="5" class="muted">加载中...</td></tr></tbody>
+        </table>
+      </div>
+    </section>
   </section>
 
-  <section class="panel">
-    <h2>站点清单</h2>
-    <p class="muted">本版本（M1）仅支持查看，站点的新增/编辑/启停将在后续版本提供。</p>
-    <div class="table-wrap">
-      <table id="sites-table">
-        <thead>
-          <tr><th>site_id</th><th>domain</th><th>启用</th><th>最近状态</th><th>最近成功</th><th>最近错误</th><th>baseline</th></tr>
-        </thead>
-        <tbody><tr><td colspan="7" class="muted">加载中...</td></tr></tbody>
-      </table>
-    </div>
-  </section>
+  <section id="tab-sites" class="tab-page" hidden>
+    <section class="panel" id="site-list-panel">
+      <h2>监控站点</h2>
+      <div class="toolbar">
+        <input type="text" id="site-search" placeholder="搜索 site_id 或域名..." />
+        <select id="site-filter-enabled">
+          <option value="">全部启用状态</option>
+          <option value="true">仅启用</option>
+          <option value="false">仅暂停</option>
+        </select>
+        <select id="site-filter-status">
+          <option value="">全部状态</option>
+          <option value="success">成功</option>
+          <option value="partial">部分成功</option>
+          <option value="failed">失败</option>
+        </select>
+        <select id="site-filter-priority">
+          <option value="">全部优先级</option>
+          <option value="high">high</option>
+          <option value="medium">medium</option>
+          <option value="low">low</option>
+        </select>
+        <button id="btn-new-site" class="btn-primary">+ 新增站点</button>
+      </div>
+      <p class="muted" id="site-result-count"></p>
+      <div class="table-wrap">
+        <table id="site-manage-table">
+          <thead>
+            <tr>
+              <th>启用</th><th>site_id</th><th>domain</th><th>优先级</th><th>最近状态</th>
+              <th>最近成功</th><th>最近错误</th><th>baseline</th><th>手工Sitemap</th><th>站点限制</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody><tr><td colspan="11" class="muted">加载中...</td></tr></tbody>
+        </table>
+      </div>
+      <div class="pagination" id="site-pagination"></div>
+    </section>
 
-  <section class="panel">
-    <h2>运行历史</h2>
-    <div class="table-wrap">
-      <table id="runs-table">
-        <thead>
-          <tr><th>run_id</th><th>开始时间</th><th>状态</th><th>成功/部分/失败</th><th>新增URL</th></tr>
-        </thead>
-        <tbody><tr><td colspan="5" class="muted">加载中...</td></tr></tbody>
-      </table>
-    </div>
+    <section class="panel" id="site-form-panel" hidden>
+      <h2 id="site-form-title">新增站点</h2>
+      <div id="site-form-error" class="form-error" hidden></div>
+      <form id="site-form">
+        <div class="form-row">
+          <label>site_id <span class="req">*</span></label>
+          <input type="text" name="site_id" id="field-site-id" placeholder="如 poki（小写字母/数字/下划线/连字符）" />
+          <p class="field-hint">仅小写字母、数字、下划线、连字符，创建后不可修改。</p>
+        </div>
+        <div class="form-row">
+          <label>域名 <span class="req">*</span></label>
+          <input type="text" name="domain" id="field-domain" placeholder="如 poki.com（不含 https://）" />
+        </div>
+        <div class="form-row">
+          <label>优先级</label>
+          <select name="priority" id="field-priority">
+            <option value="high">high</option>
+            <option value="medium" selected>medium</option>
+            <option value="low">low</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label><input type="checkbox" name="enabled" id="field-enabled" checked /> 启用监控</label>
+        </div>
+        <div class="form-row">
+          <label>robots.txt 地址</label>
+          <input type="text" name="robots_url" id="field-robots-url" placeholder="留空则自动使用 https://<域名>/robots.txt" />
+        </div>
+        <details class="advanced-fields">
+          <summary>高级字段</summary>
+          <div class="form-row">
+            <label>单一 Sitemap 地址</label>
+            <input type="text" name="sitemap_url" id="field-sitemap-url" />
+          </div>
+          <div class="form-row">
+            <label>expected_game_path</label>
+            <input type="text" name="expected_game_path" id="field-expected-game-path" />
+          </div>
+          <div class="form-row">
+            <label>site_category</label>
+            <input type="text" name="site_category" id="field-site-category" />
+          </div>
+          <div class="form-row">
+            <label>备注</label>
+            <textarea name="notes" id="field-notes" rows="3"></textarea>
+          </div>
+        </details>
+
+        <div id="site-form-preview" class="preview-box" hidden>
+          <h3>保存前确认</h3>
+          <pre id="site-form-preview-content"></pre>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" id="btn-preview-site" class="btn-primary">下一步：预览</button>
+          <button type="button" id="btn-confirm-save-site" class="btn-primary" hidden>确认保存</button>
+          <button type="button" id="btn-cancel-site-form">取消</button>
+        </div>
+      </form>
+      <div id="site-form-success" class="notice" hidden>
+        <p>保存成功。</p>
+        <button id="btn-diagnose-after-save" class="btn-primary">立即诊断</button>
+        <button id="btn-back-to-list">返回站点列表</button>
+      </div>
+    </section>
+
+    <section class="panel" id="site-detail-panel" hidden>
+      <button id="btn-close-detail">&larr; 返回列表</button>
+      <h2 id="site-detail-title"></h2>
+      <div id="site-detail-content"></div>
+    </section>
   </section>
 </main>
 

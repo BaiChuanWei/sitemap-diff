@@ -38,21 +38,40 @@ export function isValidToken(req, sessionToken) {
 
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024; // 1MB
 
-/** 读取请求体并限制大小；超过上限时拒绝，不把超大 body 读进内存后再校验。 */
+/**
+ * 读取请求体并限制大小；超过上限时拒绝，不把超大 body 读进内存后再校验。
+ *
+ * 注意：这里刻意不调用 req.destroy()——HTTP 请求和响应共用同一个底层
+ * socket，销毁 req 会连带断开整个连接，导致服务端来不及把 413 响应写
+ * 回给客户端，浏览器端只会看到一个原始的连接错误而不是 413 状态码。
+ * 调用方负责正常写完错误响应；未读完的多余请求体交给 Node 在响应结束、
+ * 连接关闭时一并丢弃（写错误响应时应带上 Connection: close，避免残留
+ * 的请求体字节污染同一 keep-alive 连接上的下一个请求）。
+ */
 export function readBodyWithLimit(req, maxBytes = DEFAULT_MAX_BODY_BYTES) {
   return new Promise((resolve, reject) => {
     let total = 0;
+    let settled = false;
     const chunks = [];
     req.on('data', (chunk) => {
+      if (settled) return;
       total += chunk.length;
       if (total > maxBytes) {
+        settled = true;
         reject(Object.assign(new Error('请求体超过大小限制'), { code: 'BODY_TOO_LARGE' }));
-        req.destroy();
         return;
       }
       chunks.push(chunk);
     });
-    req.on('end', () => resolve(Buffer.concat(chunks)));
-    req.on('error', reject);
+    req.on('end', () => {
+      if (settled) return;
+      settled = true;
+      resolve(Buffer.concat(chunks));
+    });
+    req.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    });
   });
 }

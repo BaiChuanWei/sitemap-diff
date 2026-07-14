@@ -1,16 +1,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { request as httpRequest } from 'node:http';
 import { loadLocalConfig } from '../../src/config.js';
 import { createDashboardServer, SERVICE_NAME } from '../../src/dashboard/server.js';
 
+const SITES_HEADER = 'site_id,domain,priority,enabled,robots_url,sitemap_url,expected_game_path,notes,site_category';
+
 function withDashboard(fn, { port = 0, seed } = {}) {
   return async () => {
     const dir = mkdtempSync(join(tmpdir(), 'dashboard-server-'));
-    const config = loadLocalConfig({ dbPath: join(dir, 'test.db'), outputDir: join(dir, 'output') });
+    const config = loadLocalConfig({
+      dbPath: join(dir, 'test.db'),
+      sitesCsvPath: join(dir, 'sites.csv'),
+      siteLimitsCsvPath: join(dir, 'site-limits.csv'),
+      siteSitemapsCsvPath: join(dir, 'site-sitemaps.csv'),
+      outputDir: join(dir, 'output'),
+    });
+    writeFileSync(config.sitesCsvPath, `${SITES_HEADER}\n`, 'utf-8');
     let dashboard;
     try {
       // 端口 0 = 由操作系统分配空闲端口，避免测试间冲突；但本项目的 Host
@@ -44,9 +53,10 @@ test('GET /api/health 返回服务标识', withDashboard(async ({ port }) => {
   const res = await fetch(apiUrl(port, '/api/health'), { headers: apiHeaders(port) });
   assert.equal(res.status, 200);
   const body = await res.json();
-  assert.equal(body.status, 'ok');
-  assert.equal(body.service, SERVICE_NAME);
-  assert.ok(body.sessionToken && body.sessionToken.length > 0);
+  assert.equal(body.ok, true);
+  assert.equal(body.data.status, 'ok');
+  assert.equal(body.data.service, SERVICE_NAME);
+  assert.ok(body.data.sessionToken && body.data.sessionToken.length > 0);
 }));
 
 test('未知路由返回 404，不会让进程崩溃', withDashboard(async ({ port }) => {

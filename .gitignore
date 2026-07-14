@@ -42,6 +42,12 @@ data/
 # 每次运行生成的报告（CSV/JSON/Markdown）
 output/
 
+# 面板写操作审计日志（运行时生成，不提交）
+/logs/
+
+# 面板配置写入前的自动备份（运行时生成，不提交）
+/config/backups/
+
 # Cloudflare Workers (legacy)
 .wrangler/
 dist/

@@ -68,24 +68,37 @@ export function parseSiteLimitOverrides(rows, { knownSiteIds } = {}) {
     for (const [csvField, limitKey] of Object.entries(LIMIT_FIELD_MAP)) {
       const raw = row[csvField];
       if (raw === undefined || raw === '') continue; // 未填写 = 保持默认值
-
-      const n = Number(raw);
-      if (!Number.isInteger(n) || n <= 0) {
-        throw new Error(
-          `config/site-limits.csv 中 site_id=${siteId} 的 ${csvField} 不是合法正整数: "${raw}"`,
-        );
+      try {
+        override[limitKey] = validateLimitFieldValue(csvField, raw);
+      } catch (err) {
+        throw new Error(`config/site-limits.csv 中 site_id=${siteId} 的 ${err.message}`);
       }
-      const cap = LIMIT_HARD_CAPS[csvField];
-      if (n > cap) {
-        throw new Error(
-          `config/site-limits.csv 中 site_id=${siteId} 的 ${csvField}=${n} 超过程序硬上限 ${cap}`,
-        );
-      }
-      override[limitKey] = n;
     }
     map.set(siteId, override);
   }
   return map;
+}
+
+/**
+ * 校验单个限制字段的值（正整数、不超硬上限），CSV 解析路径和 Dashboard M2
+ * 的 JSON API 写入路径共用这一份规则，不允许出现两套不同的校验逻辑。
+ * 返回校验通过的整数；失败时抛出的 Error.message 只包含"字段名不合法
+ * 原因"这一段，方便两个调用方各自拼出符合自己上下文的完整提示。
+ */
+export function validateLimitFieldValue(csvField, raw) {
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) {
+    const err = new Error(`${csvField} 不是合法正整数: "${raw}"`);
+    err.code = 'INVALID_INTEGER';
+    throw err;
+  }
+  const cap = LIMIT_HARD_CAPS[csvField];
+  if (n > cap) {
+    const err = new Error(`${csvField}=${n} 超过程序硬上限 ${cap}`);
+    err.code = 'OVER_HARD_CAP';
+    throw err;
+  }
+  return n;
 }
 
 /** 用某个站点的覆盖片段合并出最终生效的 limits 对象；没有覆盖时原样返回 defaultLimits。 */

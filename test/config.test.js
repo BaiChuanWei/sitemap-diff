@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadLocalConfig, parseSitesCsv, loadSiteOverrides } from '../src/config.js';
+import { loadLocalConfig, parseSitesCsv, loadSiteOverrides, parseCsvWithHeaders, serializeCsv } from '../src/config.js';
 
 test('loadLocalConfig: 默认路径都在项目内，且可以被 overrides 覆盖', () => {
   const defaults = loadLocalConfig();
@@ -102,6 +102,28 @@ test('loadSiteOverrides: 文件存在时正确解析真实内容', () => {
     assert.equal(limitOverrides.get('kongregate').MAX_DOWNLOAD_BYTES, 52428800);
     assert.deepEqual(sitemapOverrides.get('lagged'), { mode: 'manual_only', urls: ['https://lagged.com/sitemap.xml'] });
   });
+});
+
+test('parseCsvWithHeaders + serializeCsv：往返一致，含逗号/引号/中文/空值', () => {
+  const original = [
+    'site_id,domain,priority,enabled,robots_url,sitemap_url,expected_game_path,notes,site_category',
+    'poki,poki.com,high,true,https://poki.com/robots.txt,,/g/,"备注，含逗号和""引号""",A',
+    'x,x.com,low,false,,,,',
+  ].join('\n');
+  const { headers, rows } = parseCsvWithHeaders(original);
+  const serialized = serializeCsv(headers, rows);
+  const reparsed = parseCsvWithHeaders(serialized);
+  assert.deepEqual(reparsed.headers, headers);
+  assert.deepEqual(reparsed.rows, rows);
+  assert.equal(rows[0].notes, '备注，含逗号和"引号"');
+});
+
+test('serializeCsv：换行符字段正确转义', () => {
+  const headers = ['site_id', 'notes'];
+  const rows = [{ site_id: 'a', notes: 'line1\nline2' }];
+  const serialized = serializeCsv(headers, rows);
+  const reparsed = parseCsvWithHeaders(serialized);
+  assert.equal(reparsed.rows[0].notes, 'line1\nline2');
 });
 
 test('loadSiteOverrides: 文件存在但内容非法时明确抛错，不静默使用危险值', () => {

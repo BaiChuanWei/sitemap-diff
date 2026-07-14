@@ -62,7 +62,8 @@ export async function probeExisting(port) {
     });
     if (!res.ok) return { status: 'other' };
     const body = await res.json();
-    if (body.service === SERVICE_NAME) return { status: 'self', pid: body.pid };
+    const data = body.data || body; // 兼容非本项目服务返回的非信封格式响应
+    if (data.service === SERVICE_NAME) return { status: 'self', pid: data.pid };
     return { status: 'other' };
   } catch (err) {
     if (err.cause?.code === 'ECONNREFUSED' || err.name === 'TimeoutError') return { status: 'free' };
