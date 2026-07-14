@@ -142,6 +142,33 @@ test('单站失败不影响其他站：一个采集抛错，其他站正常建�
   });
 });
 
+test('准入：status=success 但 pageUrlCount=0（零价值成功）不得计入 sites_failed，需与 site_crawl_runs.status 一致', async () => {
+  // 复现 50 站阶段发现的真实 bug：html5games.com 这类站点技术上抓取成功
+  // （status=success/complete=true/truncated=false），但 Sitemap 内容是
+  // 空模板，pageUrlCount=0，因此 isAdmissible() 判定不可准入。此前
+  // collect-runner.js 的聚合计数只区分 status==='partial' 和"其余全部计
+  // 入 failed"，导致这种 status=success 的站点被错误地计入了
+  // crawl_runs.sites_failed，而 site_crawl_runs.status 里存的却仍然是
+  // 'success'——造成汇总统计和逐站表相互矛盾（50 站阶段第二轮
+  // sites_failed=13 但 site_crawl_runs 里实际只有 12 条 status=failed）。
+  await withTempDb(async (db) => {
+    const site = insertSite(db, 'zerovalue', 'zerovalue.com');
+    const r = await runCollect(db, {
+      sites: [site],
+      runId: 'run-1',
+      collectSiteFn: async () => completeResult('zerovalue', []), // pageUrlCount=0，但 status 仍是 success
+    });
+    assert.equal(r.stats.sitesSuccess, 0, '零 URL 不应准入为 success');
+    assert.equal(r.stats.sitesFailed, 0, 'status=success 的站点不应计入 sites_failed');
+    assert.equal(r.stats.sitesPartial, 1, '未准入但 status!=failed 的站点应计入 sites_partial');
+    const scr = db.prepare('SELECT status FROM site_crawl_runs WHERE site_id = ?').get('zerovalue');
+    assert.equal(scr.status, 'success', 'site_crawl_runs 应如实记录采集器返回的技术状态');
+    const row = db.prepare('SELECT * FROM crawl_runs WHERE run_id = ?').get('run-1');
+    assert.equal(row.sites_failed, 0);
+    assert.equal(row.sites_partial, 1);
+  });
+});
+
 test('crawl_runs 汇总：sites_total/success/partial/failed 与 baseline 统计正确', async () => {
   await withTempDb(async (db) => {
     const s1 = insertSite(db, 's1', 's1.com');

@@ -59,8 +59,13 @@ export async function runCollect(db, { sites, runId = randomUUID(), collectSiteF
         siteOutcomes.push({ siteId: site.site_id, status: 'success', isBaseline: persisted.isBaseline, added: persisted.addedCount });
       } else {
         recordRejectedSiteResult(db, { runId, site, result, now: ts });
-        if (result.status === 'partial') stats.sitesPartial++;
-        else stats.sitesFailed++;
+        // 聚合分桶必须以"是否真的彻底失败"（result.status === 'failed'）为准，
+        // 不能只识别 'partial' 而把其余全部计入 failed——否则 status=success
+        // 但因 pageUrlCount=0 等原因未被准入的结果（如 html5games.com 这类
+        // 空内容站点）会被错误计入 sites_failed，而 site_crawl_runs 里持久化
+        // 的仍是 status=success，导致汇总统计与逐站表相互矛盾。
+        if (result.status === 'failed') stats.sitesFailed++;
+        else stats.sitesPartial++;
         siteOutcomes.push({ siteId: site.site_id, status: result.status });
         if (result.errors && result.errors.length) {
           errorSummaries.push(`${site.site_id}: ${result.errors[0].code || 'ERROR'}`);
