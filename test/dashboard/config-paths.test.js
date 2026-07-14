@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadLocalConfig } from '../../src/config.js';
 import { openDb } from '../../src/db/index.js';
-import { createDashboardServer } from '../../src/dashboard/server.js';
+import { createAndListenDashboard } from './helpers/listen-with-retry.js';
 
 const SITES_HEADER = 'site_id,domain,priority,enabled,robots_url,sitemap_url,expected_game_path,notes,site_category';
 
@@ -34,10 +34,8 @@ test('面板服务在含中文的项目路径下能正常提供静态首页', as
       outputDir: join(dir, 'output'),
     });
     writeFileSync(config.sitesCsvPath, `${SITES_HEADER}\n`, 'utf-8');
-    const port = 28711 + Math.floor(Math.random() * 500);
-    const dashboard = createDashboardServer({ config, port });
+    const { dashboard, port } = await createAndListenDashboard({ config });
     try {
-      await dashboard.listen();
       const res = await fetch(`http://127.0.0.1:${port}/`, { headers: { host: `127.0.0.1:${port}` } });
       assert.equal(res.status, 200);
       const text = await res.text();

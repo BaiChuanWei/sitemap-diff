@@ -8,10 +8,14 @@ import { LIMIT_FIELD_MAP, validateLimitFieldValue } from '../site-overrides.js';
  */
 
 export class ValidationError extends Error {
-  constructor(message, fieldErrors = {}) {
+  constructor(message, fieldErrors = {}, code) {
     super(message);
     this.name = 'ValidationError';
     this.fieldErrors = fieldErrors;
+    // 可选：多数校验失败用统一的 VALIDATION_ERROR 码就够了；少数场景
+    // （比如 Dashboard M3 的站点选择校验）需要一个更具体的错误码
+    // （INVALID_SITE_SELECTION），复用同一个错误类型，不必另建一个。
+    this.code = code;
   }
 }
 
@@ -325,4 +329,71 @@ export function validateSitemapsInput(input) {
   }
 
   return { mode: mode || 'merge', urls: normalizedUrls };
+}
+
+// Dashboard M3：运行控制的防御性上限——真实场景站点表最多几百条，这里给
+// 一个远超合理值的硬上限，避免异常请求体（比如脚本误传几万个字符串）在
+// 落到数据库校验之前就先撑爆内存或拖慢逐个存在性检查。
+const MAX_RUN_SITE_IDS = 5000;
+
+/**
+ * 校验 POST /api/runs 的请求体：{ mode: 'all' } 或
+ * { mode: 'selected', siteIds: [...] }。
+ *
+ * 只做"形状"校验（类型、去重、格式、防御性数量上限）；"这些 site_id 是否
+ * 真的存在、是否已启用"留给 run-controller.js 用当前 SQLite 状态校验——
+ * 两次请求之间站点状态可能已经变了，不能在这里假设路由层看到的就是最新的。
+ */
+export function validateRunStartInput(input, { totalSiteCount } = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new ValidationError('请求体必须是一个 JSON 对象');
+  }
+  const allowedFields = new Set(['mode', 'siteIds']);
+  const unknown = Object.keys(input).filter((k) => !allowedFields.has(k));
+  if (unknown.length > 0) {
+    throw new ValidationError(`未知字段: ${unknown.join(', ')}`, Object.fromEntries(unknown.map((f) => [f, '未知字段'])));
+  }
+
+  if (input.mode !== 'all' && input.mode !== 'selected') {
+    throw new ValidationError('mode 只能是 "all" 或 "selected"', { mode: 'mode 只能是 "all" 或 "selected"' });
+  }
+  if (input.mode === 'all') {
+    if (input.siteIds !== undefined) {
+      throw new ValidationError('mode="all" 时不应该传 siteIds', { siteIds: 'mode="all" 时不应该传 siteIds' });
+    }
+    return { mode: 'all' };
+  }
+
+  // mode === 'selected'
+  if (!Array.isArray(input.siteIds)) {
+    throw new ValidationError('siteIds 必须是数组', { siteIds: 'siteIds 必须是数组' }, 'INVALID_SITE_SELECTION');
+  }
+  if (input.siteIds.length === 0) {
+    throw new ValidationError('siteIds 不能为空', { siteIds: '至少选择一个站点' }, 'INVALID_SITE_SELECTION');
+  }
+  if (input.siteIds.length > MAX_RUN_SITE_IDS) {
+    throw new ValidationError(
+      `siteIds 数量过多（${input.siteIds.length}），超过防御性上限 ${MAX_RUN_SITE_IDS}`,
+      { siteIds: '数量超过上限' },
+      'INVALID_SITE_SELECTION',
+    );
+  }
+  for (const id of input.siteIds) {
+    if (typeof id !== 'string' || !SITE_ID_REGEX.test(id)) {
+      throw new ValidationError(
+        `siteIds 包含不合法的 site_id: ${JSON.stringify(id)}`,
+        { siteIds: '包含不合法的 site_id（不接受域名、URL 或任意字符串）' },
+        'INVALID_SITE_SELECTION',
+      );
+    }
+  }
+  const deduped = [...new Set(input.siteIds)];
+  if (typeof totalSiteCount === 'number' && deduped.length > totalSiteCount) {
+    throw new ValidationError(
+      `选中站点数（${deduped.length}）超过配置站点总数（${totalSiteCount}）`,
+      { siteIds: '选中数量超过配置站点总数' },
+      'INVALID_SITE_SELECTION',
+    );
+  }
+  return { mode: 'selected', siteIds: deduped };
 }

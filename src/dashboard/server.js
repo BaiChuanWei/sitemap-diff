@@ -11,6 +11,9 @@ import { getHealth, SERVICE_NAME } from './routes/health.js';
 import { getOverview, listSites, listRuns, getRunDetail } from './routes/overview.js';
 import { createSite, updateSite, setSiteEnabled, getSiteDetail, getSiteLimits, putSiteLimits, getSiteSitemaps, putSiteSitemaps, ApiError } from './routes/sites-write.js';
 import { startDiagnosis, getDiagnosis } from './routes/diagnose-write.js';
+import { createRunController } from './run-controller.js';
+import { startRunRoute, cancelRunRoute } from './routes/runs-write.js';
+import { getActiveRunRoute, getRunSitesRoute, getRunChangesRoute, getRunReportRoute, getRunReportFileRoute } from './routes/runs-read.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '..', '..');
@@ -29,8 +32,10 @@ export { SERVICE_NAME };
  * @param config     loadLocalConfig() 的返回值
  * @param port       监听端口（默认 8766，可用 SITEMAP_DASHBOARD_PORT 覆盖）
  * @param logDir     可选：审计日志目录覆盖（测试用）
+ * @param collectSiteFn       Dashboard M3：可选，测试注入用的采集函数（默认真实 collectSite）
+ * @param classifyFetchPagesFn Dashboard M3：可选，测试注入用的分类页面抓取函数（默认真实 fetchPages）
  */
-export function createDashboardServer({ config, port, logDir, diagnoseFetchImpl }) {
+export function createDashboardServer({ config, port, logDir, diagnoseFetchImpl, collectSiteFn, classifyFetchPagesFn }) {
   const db = openDb(config.dbPath);
   // 启动时把 config/sites.csv 同步进 SQLite，和 CLI 的 runBaseline() 行为
   // 一致——config/sites.csv 才是正式配置源，站点列表/详情接口读的是 SQLite
@@ -45,6 +50,7 @@ export function createDashboardServer({ config, port, logDir, diagnoseFetchImpl 
   const sessionToken = generateSessionToken();
   const eventHub = new EventHub();
   const auditLogDir = logDir || join(projectRoot, 'logs');
+  const runController = createRunController({ db, config, eventHub, collectSiteFn, classifyFetchPagesFn, logDir: auditLogDir });
 
   const server = createHttpServer((req, res) => {
     handleRequest(req, res).catch((err) => {
@@ -162,6 +168,61 @@ export function createDashboardServer({ config, port, logDir, diagnoseFetchImpl 
       return sendData(res, 200, { runs: listRuns(db, { limit }) });
     }
 
+    if (req.method === 'POST' && url.pathname === '/api/runs') {
+      return withJsonBody(req, res, (body) => {
+        const result = startRunRoute(db, runController, body, { logDir: auditLogDir });
+        sendData(res, 202, result);
+      });
+    }
+
+    // /api/runs/active 必须比下面的通用 /api/runs/:run_id 先匹配——
+    // 'active' 本身也满足 [^/]+，不特殊处理会被当成一个 run_id 去查历史记录。
+    if (req.method === 'GET' && url.pathname === '/api/runs/active') {
+      return sendData(res, 200, getActiveRunRoute(runController));
+    }
+
+    const runCancelMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/cancel$/);
+    if (runCancelMatch && req.method === 'POST') {
+      return withJsonBody(req, res, () => {
+        const result = cancelRunRoute(runController, decodeURIComponent(runCancelMatch[1]));
+        sendData(res, 200, result);
+      });
+    }
+
+    const runSitesMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/sites$/);
+    if (runSitesMatch && req.method === 'GET') {
+      return sendData(res, 200, getRunSitesRoute(runController, decodeURIComponent(runSitesMatch[1])));
+    }
+
+    const runChangesMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/changes$/);
+    if (runChangesMatch && req.method === 'GET') {
+      const runId = decodeURIComponent(runChangesMatch[1]);
+      const result = getRunChangesRoute(db, runController, runId, {
+        siteId: url.searchParams.get('site_id') || undefined,
+        type: url.searchParams.get('type') || undefined,
+        page: url.searchParams.get('page') || undefined,
+        pageSize: url.searchParams.get('page_size') || undefined,
+      });
+      return sendData(res, 200, result);
+    }
+
+    const runReportFileMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/report\/([^/]+)$/);
+    if (runReportFileMatch && req.method === 'GET') {
+      const runId = decodeURIComponent(runReportFileMatch[1]);
+      const filename = decodeURIComponent(runReportFileMatch[2]);
+      const { filePath, contentType } = getRunReportFileRoute(db, config, runController, runId, filename);
+      const content = readFileSync(filePath);
+      res.writeHead(200, { 'content-type': contentType, 'content-disposition': `attachment; filename="${filename}"` });
+      res.end(content);
+      return;
+    }
+
+    const runReportMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/report$/);
+    if (runReportMatch && req.method === 'GET') {
+      const runId = decodeURIComponent(runReportMatch[1]);
+      return sendData(res, 200, getRunReportRoute(db, config, runController, runId));
+    }
+
     if (req.method === 'GET' && /^\/api\/runs\/[^/]+$/.test(url.pathname)) {
       const runId = decodeURIComponent(url.pathname.split('/')[3]);
       const detail = getRunDetail(db, runId);
@@ -226,7 +287,12 @@ export function createDashboardServer({ config, port, logDir, diagnoseFetchImpl 
     res.end(
       JSON.stringify({
         ok: false,
-        error: { code: apiError.code, message: apiError.message, fieldErrors: apiError.fieldErrors || undefined },
+        error: {
+          code: apiError.code,
+          message: apiError.message,
+          fieldErrors: apiError.fieldErrors || undefined,
+          ...(apiError.extra || {}),
+        },
       }),
     );
   }
@@ -248,7 +314,15 @@ export function createDashboardServer({ config, port, logDir, diagnoseFetchImpl 
     close() {
       eventHub.close();
       db.close();
-      return new Promise((resolvePromise) => server.close(() => resolvePromise()));
+      const closed = new Promise((resolvePromise) => server.close(() => resolvePromise()));
+      // server.close() 只是不再接受新连接，已有的 keep-alive 连接（包括
+      // 客户端明明已经读完响应、只是还没主动断开的空闲连接）会一直占着，
+      // 导致 close() 迟迟不 resolve、端口迟迟不释放——本地单用户面板场景
+      // 下没有必要保留这些连接等它们自然超时，主动强制断开更符合"关闭
+      // 就是关闭"的预期（尤其是测试里频繁开关服务器、随机选端口的场景，
+      // 端口释放不及时会导致下一个测试偶发端口冲突）。
+      server.closeAllConnections?.();
+      return closed;
     },
   };
 }

@@ -191,6 +191,27 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .diagnose-result { margin-top: 12px; }
 
+/* ---- 实时运行 ---- */
+.run-progress-track {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  margin: 10px 0 4px;
+}
+.run-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  width: 0%;
+  transition: width 0.3s ease;
+}
+
+.status-waiting { background: #f3f4f6; color: var(--muted); }
+.status-running { background: #dbeafe; color: var(--accent); }
+
+#run-sites-table td.has-added { font-weight: 600; }
+
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
@@ -201,4 +222,6 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
     --muted: #9aa1ac;
   }
   .conn-status { background: #232733; }
+  .status-waiting { background: #232733; }
+  .status-running { background: #1e3a5f; }
 }

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadLocalConfig } from '../../src/config.js';
-import { createDashboardServer } from '../../src/dashboard/server.js';
+import { createAndListenDashboard } from './helpers/listen-with-retry.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '..', '..');
@@ -26,13 +26,11 @@ function withSeededDashboard(fn) {
     // 走 CSV → syncSites 这条路径，所以这里不能让启动时的 syncSites() 读到
     // 真实项目的 config/sites.csv（否则会和下面的手工 INSERT 撞主键）。
     writeFileSync(config.sitesCsvPath, `${SITES_HEADER}\n`, 'utf-8');
-    const port = 28711 + Math.floor(Math.random() * 500);
-    const dashboard = createDashboardServer({ config, port });
+    const { dashboard, port } = await createAndListenDashboard({ config });
     try {
       dashboard.db.prepare(`INSERT INTO sites (site_id, domain, enabled, last_status, baseline_completed_at) VALUES ('poki','poki.com',1,'success','2026-01-01T00:00:00Z')`).run();
       dashboard.db.prepare(`INSERT INTO crawl_runs (run_id, started_at, finished_at, status, sites_total, sites_success, sites_partial, sites_failed, added_url_count) VALUES ('r1','2026-01-01T00:00:00Z','2026-01-01T00:01:00Z','success',1,1,0,0,3)`).run();
       dashboard.db.prepare(`INSERT INTO site_crawl_runs (run_id, site_id, status, complete, truncated, page_url_count, added_url_count) VALUES ('r1','poki','success',1,0,100,3)`).run();
-      await dashboard.listen();
       await fn({ dashboard, port });
     } finally {
       await dashboard.close();

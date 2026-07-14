@@ -68,6 +68,38 @@ test('stop-dashboard.ps1：提供正常停止方式，且先校验 service 标�
   assert.match(content, /Stop-Process/);
 });
 
+// Dashboard M2 起 /api/health 的响应体从 { service, pid, ... } 改成了
+// { ok:true, data:{ service, pid, ... } } 信封格式，start-dashboard.ps1 和
+// stop-dashboard.ps1 当时都没有跟着改，导致 $body.service/$body.pid 永远
+// 是 $null——启动脚本会把"服务其实已经在运行"误判成"没在运行"而重复启动，
+// 停止脚本会把"就是本项目的服务"误判成"不是"而拒绝停止。这两条测试锁定
+// 修复后的 .data 解包，防止同类回归。
+test('start-dashboard.ps1：health 检查从信封的 .data 里取字段，不直接读顶层', () => {
+  const content = readFileSync(join(scriptsDir, 'start-dashboard.ps1'), 'utf-8');
+  assert.match(content, /\$envelope\.data/);
+  assert.match(content, /\$body\.service/);
+});
+
+test('stop-dashboard.ps1：health 检查从信封的 .data 里取字段，不直接读顶层', () => {
+  const content = readFileSync(join(scriptsDir, 'stop-dashboard.ps1'), 'utf-8');
+  assert.match(content, /\$envelope\.data/);
+  assert.match(content, /\$body\.pid/);
+});
+
+test('run-and-open-dashboard.ps1：通过 ?action=start-all 打开浏览器触发一键启动，不在脚本里直接调用写接口', () => {
+  const content = readFileSync(join(scriptsDir, 'run-and-open-dashboard.ps1'), 'utf-8');
+  assert.match(content, /\?action=start-all/);
+  // 不应该在 PowerShell 里自己拼 CSRF token/POST body 去调 /api/runs——
+  // 那套认证逻辑只应该存在于 app.js 一处，脚本只负责打开对应的 URL。
+  assert.doesNotMatch(content, /Invoke-WebRequest.*\/api\/runs/);
+  assert.doesNotMatch(content, /Invoke-RestMethod.*\/api\/runs/);
+});
+
+test('run-and-open-dashboard.ps1：只打开一个浏览器窗口（借助 start-dashboard.ps1 的 -NoBrowser）', () => {
+  const content = readFileSync(join(scriptsDir, 'run-and-open-dashboard.ps1'), 'utf-8');
+  assert.match(content, /-NoBrowser/);
+});
+
 test('create-desktop-shortcuts.ps1：创建两个指定名称的快捷方式', () => {
   const content = readFileSync(join(scriptsDir, 'create-desktop-shortcuts.ps1'), 'utf-8');
   assert.match(content, /Sitemap监控面板/);

@@ -12,6 +12,7 @@
   <nav class="tabs">
     <button class="tab-btn active" data-tab="overview">总览</button>
     <button class="tab-btn" data-tab="sites">站点管理</button>
+    <button class="tab-btn" data-tab="run">实时运行</button>
   </nav>
   <div class="conn-status" id="conn-status">连接中...</div>
 </header>
@@ -24,6 +25,9 @@
         <p class="muted">加载中...</p>
       </div>
       <div class="notice" id="stale-run-notice" hidden></div>
+      <div class="form-actions">
+        <button id="btn-start-all-overview" class="btn-primary">开始全部监控</button>
+      </div>
     </section>
 
     <section class="panel">
@@ -64,15 +68,20 @@
         <button id="btn-new-site" class="btn-primary">+ 新增站点</button>
       </div>
       <p class="muted" id="site-result-count"></p>
+      <div class="toolbar">
+        <span class="muted" id="site-selected-count">已选择 0 个站点</span>
+        <button id="btn-run-selected">运行选中站点</button>
+      </div>
       <div class="table-wrap">
         <table id="site-manage-table">
           <thead>
             <tr>
+              <th><input type="checkbox" id="site-select-all" title="全选当前筛选结果" /></th>
               <th>启用</th><th>site_id</th><th>domain</th><th>优先级</th><th>最近状态</th>
               <th>最近成功</th><th>最近错误</th><th>baseline</th><th>手工Sitemap</th><th>站点限制</th><th>操作</th>
             </tr>
           </thead>
-          <tbody><tr><td colspan="11" class="muted">加载中...</td></tr></tbody>
+          <tbody><tr><td colspan="12" class="muted">加载中...</td></tr></tbody>
         </table>
       </div>
       <div class="pagination" id="site-pagination"></div>
@@ -148,6 +157,74 @@
       <button id="btn-close-detail">&larr; 返回列表</button>
       <h2 id="site-detail-title"></h2>
       <div id="site-detail-content"></div>
+    </section>
+  </section>
+
+  <section id="tab-run" class="tab-page" hidden>
+    <section class="panel" id="run-idle-panel">
+      <h2>实时运行</h2>
+      <div class="notice" id="run-stale-notice" hidden></div>
+      <p class="muted" id="run-idle-message">当前没有正在进行的监控任务。</p>
+      <div id="run-last-summary" class="detail-block" hidden></div>
+      <div class="form-actions">
+        <button id="btn-start-all-run-tab" class="btn-primary">开始全部监控</button>
+      </div>
+    </section>
+
+    <section class="panel" id="run-active-panel" hidden>
+      <h2>实时运行</h2>
+      <div class="cards" id="run-header-cards"></div>
+      <div class="run-progress-track"><div class="run-progress-bar" id="run-progress-bar"></div></div>
+      <p class="muted" id="run-progress-label"></p>
+      <div class="form-actions">
+        <button id="btn-cancel-run">安全停止</button>
+      </div>
+      <p class="form-error" id="run-cancel-status" hidden></p>
+
+      <div class="toolbar">
+        <input type="text" id="run-site-search" placeholder="搜索 site_id 或域名..." />
+        <select id="run-site-filter-status">
+          <option value="">全部状态</option>
+          <option value="waiting">等待</option>
+          <option value="running">运行中</option>
+          <option value="success">成功</option>
+          <option value="partial">部分成功</option>
+          <option value="failed">失败</option>
+        </select>
+        <label><input type="checkbox" id="run-site-filter-added" /> 只看有新增</label>
+      </div>
+      <div class="table-wrap">
+        <table id="run-sites-table">
+          <thead>
+            <tr>
+              <th>#</th><th>站点</th><th>状态</th><th>页面URL</th><th>新增</th>
+              <th>baseline</th><th>耗时</th><th>错误</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody><tr><td colspan="9" class="muted">加载中...</td></tr></tbody>
+        </table>
+      </div>
+
+      <div class="detail-block" id="run-report-block" hidden>
+        <h3>报告</h3>
+        <p class="muted" id="run-report-dir"></p>
+        <p id="run-report-stats"></p>
+        <ul id="run-report-files"></ul>
+      </div>
+    </section>
+
+    <section class="panel" id="run-changes-panel" hidden>
+      <button id="btn-close-changes">&larr; 返回</button>
+      <h3 id="run-changes-title"></h3>
+      <div class="table-wrap">
+        <table id="run-changes-table">
+          <thead>
+            <tr><th>URL</th><th>分类</th><th>游戏名</th><th>发现时间</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="pagination" id="run-changes-pagination"></div>
     </section>
   </section>
 </main>

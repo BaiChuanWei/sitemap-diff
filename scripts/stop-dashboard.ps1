@@ -16,13 +16,17 @@ $HealthUrl = "http://127.0.0.1:$Port/api/health"
 
 try {
     $response = Invoke-WebRequest -Uri $HealthUrl -UseBasicParsing -TimeoutSec 3 -Headers @{ Host = "127.0.0.1:$Port" }
-    $body = $response.Content | ConvertFrom-Json
+    $envelope = $response.Content | ConvertFrom-Json
+    # Dashboard M2 起 /api/health 的响应体是 { ok:true, data:{...} } 信封格式，
+    # 真正的字段在 .data 下面，不是顶层——这里如果直接读 $envelope.service
+    # 永远是 $null，会被下面的判断误判成"不是本项目的服务"而拒绝停止。
+    $body = $envelope.data
 } catch {
     Write-Host "端口 $Port 上没有检测到运行中的面板服务，无需停止。"
     exit 0
 }
 
-if ($body.service -ne 'sitemap-dashboard') {
+if (-not $body -or $body.service -ne 'sitemap-dashboard') {
     Write-Host "端口 $Port 上运行的不是本项目的面板服务，为安全起见不会终止该进程。" -ForegroundColor Yellow
     exit 1
 }

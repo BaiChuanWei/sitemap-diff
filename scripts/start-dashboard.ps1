@@ -4,6 +4,14 @@
 #
 # 支持中文路径：本脚本使用 $PSScriptRoot 定位项目根目录，不依赖调用时的
 # 当前工作目录，也不硬编码任何绝对路径。
+#
+# -NoBrowser：只确保服务已启动/健康，不自动打开浏览器——供
+# run-and-open-dashboard.ps1 复用"启动/复用服务"这部分逻辑，避免它自己
+# 打开一个浏览器窗口后，run-and-open-dashboard.ps1 又打开第二个。
+
+param(
+    [switch]$NoBrowser
+)
 
 $ErrorActionPreference = 'Stop'
 
@@ -45,8 +53,11 @@ function Test-NodeAvailable {
 function Test-DashboardHealthy {
     try {
         $response = Invoke-WebRequest -Uri $HealthUrl -UseBasicParsing -TimeoutSec 3 -Headers @{ Host = "127.0.0.1:$Port" }
-        $body = $response.Content | ConvertFrom-Json
-        if ($body.service -eq 'sitemap-dashboard') {
+        $envelope = $response.Content | ConvertFrom-Json
+        # Dashboard M2 起 /api/health 响应体是 { ok:true, data:{...} } 信封，
+        # 真正字段在 .data 下面。
+        $body = $envelope.data
+        if ($body -and $body.service -eq 'sitemap-dashboard') {
             return $true
         }
         return $false
@@ -81,13 +92,15 @@ function Start-DashboardProcess {
 }
 
 if (Test-DashboardHealthy) {
-    Write-Host '检测到面板服务已经在运行，直接打开浏览器。'
+    Write-Host '检测到面板服务已经在运行。'
 } else {
     Start-DashboardProcess
 }
 
-Write-Host "正在打开浏览器：$DashboardUrl"
-Start-Process $DashboardUrl
+if (-not $NoBrowser) {
+    Write-Host "正在打开浏览器：$DashboardUrl"
+    Start-Process $DashboardUrl
+}
 
 Write-Host ''
 Write-Host '提示：关闭本 PowerShell 窗口不会停止后台的面板服务（服务以独立进程运行）。'

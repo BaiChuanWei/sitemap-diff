@@ -3,7 +3,15 @@
 // 拼接，避免 Sitemap URL / 页面标题 / notes 里可能出现的恶意内容被当作
 // HTML 执行。
 
-const STATUS_LABEL = { success: '成功', partial: '部分成功', failed: '失败', running: '进行中' };
+const STATUS_LABEL = {
+  success: '成功', partial: '部分成功', failed: '失败', running: '进行中',
+  cancelled: '已停止', waiting: '等待',
+};
+
+const RUN_PHASE_LABEL = {
+  preparing: '准备中', collecting: '采集中', classifying: '正在分类',
+  reporting: '正在生成报告', completed: '已完成', failed: '运行失败', cancelled: '已安全停止',
+};
 
 const state = {
   sessionToken: null,
@@ -12,6 +20,12 @@ const state = {
   pageSize: 20,
   editingSiteId: null, // null = 新增模式
   formConfigVersion: undefined,
+  selectedSiteIds: new Set(), // 站点管理页"运行选中站点"用
+  run: {
+    viewingRunId: null, // 当前"实时运行"页正在展示的 run_id（活动中或刚结束）
+    refreshInFlight: false,
+    refreshQueued: false,
+  },
 };
 
 // ---- 基础请求封装 ----
@@ -48,6 +62,9 @@ function apiErrorFrom(res, body) {
   err.code = body?.error?.code;
   err.fieldErrors = body?.error?.fieldErrors;
   err.status = res.status;
+  // 极少数错误（如 RUN_ALREADY_ACTIVE）会在 error 对象上直接带业务字段
+  // （activeRunId），完整保留整个 error 对象，调用方按需读取。
+  err.details = body?.error || {};
   return err;
 }
 
@@ -87,14 +104,16 @@ function formatTime(iso) {
 
 function setupTabs() {
   document.querySelectorAll('.tab-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
-      btn.classList.add('active');
-      document.querySelectorAll('.tab-page').forEach((p) => (p.hidden = true));
-      document.getElementById(`tab-${btn.dataset.tab}`).hidden = false;
-      if (btn.dataset.tab === 'sites') loadSiteManageList();
-    });
+    btn.addEventListener('click', () => switchToTab(btn.dataset.tab));
   });
+}
+
+function switchToTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.tab-page').forEach((p) => (p.hidden = true));
+  document.getElementById(`tab-${tab}`).hidden = false;
+  if (tab === 'sites') loadSiteManageList();
+  if (tab === 'run') refreshRunView();
 }
 
 // ---- 总览 / 运行历史（沿用 M1） ----
@@ -203,17 +222,31 @@ function renderSiteList() {
   const filtered = getFilteredSites();
   document.getElementById('site-result-count').textContent = `共 ${filtered.length} 个站点`;
 
+  // 之前选中的站点如果被筛选条件挡住了，不清空选择——切换筛选条件不应该
+  // 悄悄丢掉用户已经勾选的站点；只有站点本身被暂停/删除才会失效。
   const totalPages = Math.max(1, Math.ceil(filtered.length / state.pageSize));
   state.page = Math.min(state.page, totalPages);
   const pageItems = filtered.slice((state.page - 1) * state.pageSize, state.page * state.pageSize);
 
   tbody.replaceChildren();
   if (pageItems.length === 0) {
-    tbody.append(rowWithMessage(11, '没有符合条件的站点'));
+    tbody.append(rowWithMessage(12, '没有符合条件的站点'));
   }
   for (const s of pageItems) {
     const tr = el('tr');
+    const checkboxTd = el('td');
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.disabled = !s.enabled; // 已暂停站点不允许被选中运行
+    checkbox.checked = state.selectedSiteIds.has(s.site_id);
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) state.selectedSiteIds.add(s.site_id);
+      else state.selectedSiteIds.delete(s.site_id);
+      updateSelectedCount();
+    });
+    checkboxTd.append(checkbox);
     tr.append(
+      checkboxTd,
       el('td', { text: s.enabled ? '是' : '暂停' }),
       el('td', { text: s.site_id }),
       el('td', { text: s.domain || '-' }),
@@ -233,6 +266,26 @@ function renderSiteList() {
     tbody.append(tr);
   }
   renderPagination(totalPages);
+  updateSelectAllCheckbox(filtered);
+  updateSelectedCount();
+}
+
+/** "全选"复选框：选中/清空当前筛选结果里全部可选（已启用）的站点，不受分页影响。 */
+function updateSelectAllCheckbox(filtered) {
+  const selectAll = document.getElementById('site-select-all');
+  const selectable = filtered.filter((s) => s.enabled);
+  const allSelected = selectable.length > 0 && selectable.every((s) => state.selectedSiteIds.has(s.site_id));
+  selectAll.checked = allSelected;
+  selectAll.disabled = selectable.length === 0;
+  selectAll.onchange = () => {
+    if (selectAll.checked) selectable.forEach((s) => state.selectedSiteIds.add(s.site_id));
+    else selectable.forEach((s) => state.selectedSiteIds.delete(s.site_id));
+    renderSiteList();
+  };
+}
+
+function updateSelectedCount() {
+  document.getElementById('site-selected-count').textContent = `已选择 ${state.selectedSiteIds.size} 个站点`;
 }
 
 function renderPagination(totalPages) {
@@ -257,6 +310,19 @@ function setupSiteListControls() {
     });
   });
   document.getElementById('btn-new-site').addEventListener('click', () => openSiteForm(null));
+  document.getElementById('btn-run-selected').addEventListener('click', onRunSelectedClick);
+}
+
+async function onRunSelectedClick() {
+  const siteIds = Array.from(state.selectedSiteIds);
+  if (siteIds.length === 0) {
+    alert('请先在列表里勾选至少一个站点。');
+    return;
+  }
+  const preview = siteIds.length > 10 ? `${siteIds.slice(0, 10).join('、')} 等共 ${siteIds.length} 个站点` : siteIds.join('、');
+  const confirmed = confirm(`即将运行选中的 ${siteIds.length} 个站点：\n${preview}\n\n是否继续？`);
+  if (!confirmed) return;
+  await startRun({ mode: 'selected', siteIds });
 }
 
 // ---- 站点管理：新增/编辑表单 ----
@@ -708,20 +774,485 @@ function renderDiagnosisResult(container, entry) {
   container.append(table);
 }
 
+// ---- 实时运行 ----
+//
+// 设计原则（对应 M3 需求"前端不得单纯通过事件累加统计，服务端快照和
+// SQLite 是最终事实来源"）：SSE 事件只是"该刷新了"的信号，不携带任何
+// 前端用来累加/拼装状态的数据本身——收到任意运行相关事件后，一律重新
+// GET /api/runs/active + /api/runs/:id/sites 拿权威状态再整体重渲染，
+// 不在前端维护一份"自己算出来的"运行统计。
+
+const RUN_EVENT_NAMES = [
+  'run_started', 'run_phase_changed', 'site_started', 'sitemap_discovered', 'site_finished',
+  'classification_started', 'classification_finished', 'report_generated',
+  'run_cancel_requested', 'run_cancelled', 'run_finished', 'run_failed',
+];
+
+function setupRunTabControls() {
+  document.getElementById('btn-start-all-overview').addEventListener('click', onStartAllClick);
+  document.getElementById('btn-start-all-run-tab').addEventListener('click', onStartAllClick);
+  document.getElementById('btn-close-changes').addEventListener('click', () => showRunPanel('run-active-panel'));
+  ['run-site-search', 'run-site-filter-status'].forEach((id) => {
+    document.getElementById(id).addEventListener('input', () => applyRunSitesFilter());
+  });
+  document.getElementById('run-site-filter-added').addEventListener('change', () => applyRunSitesFilter());
+}
+
+function showRunPanel(id) {
+  ['run-idle-panel', 'run-active-panel', 'run-changes-panel'].forEach((p) => {
+    document.getElementById(p).hidden = p !== id;
+  });
+}
+
+/** 协作式刷新：避免同一时刻堆积多个并发的 /api/runs/active 请求。 */
+async function refreshRunView() {
+  if (state.run.refreshInFlight) {
+    state.run.refreshQueued = true;
+    return;
+  }
+  state.run.refreshInFlight = true;
+  try {
+    await doRefreshRunView();
+  } finally {
+    state.run.refreshInFlight = false;
+    if (state.run.refreshQueued) {
+      state.run.refreshQueued = false;
+      refreshRunView();
+    }
+  }
+}
+
+async function doRefreshRunView() {
+  if (document.getElementById('tab-run').hidden) return; // 没在看这个 tab 就不用渲染，省一次 DOM 更新
+  let active = null;
+  try {
+    ({ active } = await fetchJson('/api/runs/active'));
+  } catch {
+    return;
+  }
+
+  if (active) {
+    state.run.viewingRunId = active.runId;
+    let sites = [];
+    try {
+      ({ sites } = await fetchJson(`/api/runs/${encodeURIComponent(active.runId)}/sites`));
+    } catch {
+      sites = [];
+    }
+    renderRunActive(active, sites);
+    return;
+  }
+
+  if (state.run.viewingRunId) {
+    await renderRunFinished(state.run.viewingRunId);
+    return;
+  }
+
+  await renderRunIdle();
+}
+
+async function renderRunIdle() {
+  showRunPanel('run-idle-panel');
+  document.getElementById('run-cancel-status').hidden = true;
+
+  const staleNotice = document.getElementById('run-stale-notice');
+  const lastSummaryEl = document.getElementById('run-last-summary');
+  try {
+    const overview = await fetchJson('/api/overview');
+    if (overview.staleRunningRun) {
+      staleNotice.hidden = false;
+      staleNotice.textContent =
+        `上次运行异常中断（run_id=${overview.staleRunningRun.run_id}，开始于 ${formatTime(overview.staleRunningRun.started_at)}）。` +
+        '该记录不会自动继续，也不会被当作已完成，可以直接点击下方按钮开始新的运行。';
+    } else {
+      staleNotice.hidden = true;
+    }
+  } catch {
+    staleNotice.hidden = true;
+  }
+
+  // 展示"最近一次运行"（不限模式）+ 一个能直接打开详情/报告的入口——
+  // 用户刷新页面或关闭重开浏览器时，不能因为运行已经结束就找不到刚才的
+  // 结果，"最终结果在哪里"是这个页面必须回答的问题之一。
+  lastSummaryEl.replaceChildren();
+  try {
+    const { runs } = await fetchJson('/api/runs?limit=1');
+    const lastRun = runs[0];
+    if (lastRun && lastRun.finished_at) {
+      lastSummaryEl.hidden = false;
+      const modeLabel = lastRun.run_mode === 'selected' ? '选中站点' : lastRun.run_mode === 'all' ? '全部站点' : '（命令行触发）';
+      lastSummaryEl.append(
+        el('p', {
+          text: `最近一次运行（${modeLabel}）：${formatTime(lastRun.started_at)}，${STATUS_LABEL[lastRun.status] || lastRun.status}，${lastRun.sites_success}/${lastRun.sites_total} 个站点成功，新增 ${lastRun.added_url_count} 个 URL。`,
+        }),
+      );
+      const viewBtn = el('button', { text: '查看详情/报告' });
+      viewBtn.addEventListener('click', () => {
+        state.run.viewingRunId = lastRun.run_id;
+        renderRunFinished(lastRun.run_id);
+      });
+      lastSummaryEl.append(viewBtn);
+    } else {
+      lastSummaryEl.hidden = true;
+    }
+  } catch {
+    lastSummaryEl.hidden = true;
+  }
+}
+
+async function getLastFullRunSummary() {
+  try {
+    const { runs } = await fetchJson('/api/runs?limit=10');
+    const lastAll = runs.find((r) => r.run_mode === 'all' && r.finished_at);
+    if (!lastAll) return null;
+    const durationSec = Math.round((new Date(lastAll.finished_at) - new Date(lastAll.started_at)) / 1000);
+    return { durationSec, startedAt: lastAll.started_at, sitesSuccess: lastAll.sites_success, sitesTotal: lastAll.sites_total };
+  } catch {
+    return null;
+  }
+}
+
+function renderRunActive(active, sites) {
+  showRunPanel('run-active-panel');
+  document.getElementById('run-report-block').hidden = true;
+
+  const isTerminal = ['completed', 'failed', 'cancelled'].includes(active.phase);
+  const phaseLabel = RUN_PHASE_LABEL[active.phase] || active.phase;
+  const elapsedSec = Math.max(0, Math.round((Date.now() - new Date(active.startedAt).getTime()) / 1000));
+
+  const cards = document.getElementById('run-header-cards');
+  cards.replaceChildren();
+  const cardData = [
+    ['run_id', active.runId],
+    ['阶段', active.cancelRequested && !isTerminal ? `${phaseLabel}（停止请求已提交）` : phaseLabel],
+    ['运行模式', active.mode === 'all' ? '全部站点' : '选中站点'],
+    ['已运行', `${elapsedSec} 秒`],
+    ['总站点', active.stats.sitesTotal],
+    ['已完成', active.stats.sitesCompleted ?? 0],
+    ['成功 / 部分 / 失败', `${active.stats.sitesSuccess} / ${active.stats.sitesPartial} / ${active.stats.sitesFailed}`],
+    ['baseline 站点', active.stats.baselineSiteCount],
+    ['新增 URL', active.stats.addedUrlCount],
+  ];
+  for (const [label, value] of cardData) {
+    const card = el('div', { className: 'card' });
+    card.append(el('div', { className: 'label', text: label }), el('div', { className: 'value', text: String(value ?? '-') }));
+    cards.append(card);
+  }
+
+  const total = active.stats.sitesTotal || 0;
+  const done = active.stats.sitesCompleted || 0;
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  document.getElementById('run-progress-bar').style.width = `${pct}%`;
+  document.getElementById('run-progress-label').textContent = `已完成 ${done} / ${total}（${pct}%）`;
+
+  // 一旦所有站点采集都已经结束（进入分类/生成报告阶段），"安全停止"就没有
+  // 意义了——runCollect 的取消检查只在"开始下一个站点之前"生效，分类和
+  // 报告阶段没有可以中途打断的逐条循环。继续显示按钮会让用户以为点了就能
+  // 立刻停止，实际上只是安静地等分类/报告跑完，所以这两个阶段直接隐藏
+  // 按钮，而不是显示一个点了也没用的按钮。
+  const canCancel = !isTerminal && !['classifying', 'reporting'].includes(active.phase);
+  const cancelBtn = document.getElementById('btn-cancel-run');
+  const cancelStatus = document.getElementById('run-cancel-status');
+  cancelBtn.hidden = !canCancel;
+  cancelBtn.disabled = active.cancelRequested;
+  cancelBtn.onclick = () => cancelActiveRun(active.runId);
+  if (active.cancelRequested && !isTerminal) {
+    cancelStatus.hidden = false;
+    cancelStatus.textContent = '已提交停止请求，当前正在处理的网站完成后停止，不会立即中断网络请求。';
+  } else {
+    cancelStatus.hidden = true;
+  }
+
+  renderRunSitesTable(active.runId, sites);
+}
+
+async function renderRunFinished(runId) {
+  let detail;
+  try {
+    detail = await fetchJson(`/api/runs/${encodeURIComponent(runId)}`);
+  } catch {
+    // run_id 查不到了（不太可能，但兜底）：回到空闲视图，不留一个死链接的运行页。
+    state.run.viewingRunId = null;
+    await renderRunIdle();
+    return;
+  }
+  showRunPanel('run-active-panel');
+  document.getElementById('run-report-block').hidden = true;
+
+  const run = detail.run;
+  const cards = document.getElementById('run-header-cards');
+  cards.replaceChildren();
+  const cardData = [
+    ['run_id', run.run_id],
+    ['阶段', RUN_PHASE_LABEL[run.status] || run.status],
+    ['运行模式', run.run_mode === 'selected' ? '选中站点' : run.run_mode === 'all' ? '全部站点' : '-'],
+    ['开始时间', formatTime(run.started_at)],
+    ['结束时间', formatTime(run.finished_at)],
+    ['总站点', run.sites_total],
+    ['成功 / 部分 / 失败', `${run.sites_success} / ${run.sites_partial} / ${run.sites_failed}`],
+    ['baseline 站点', run.baseline_site_count],
+    ['新增 URL', run.added_url_count],
+  ];
+  for (const [label, value] of cardData) {
+    const card = el('div', { className: 'card' });
+    card.append(el('div', { className: 'label', text: label }), el('div', { className: 'value', text: String(value ?? '-') }));
+    cards.append(card);
+  }
+  document.getElementById('run-progress-bar').style.width = '100%';
+  document.getElementById('run-progress-label').textContent = `已完成 ${run.sites_total} / ${run.sites_total}（100%）`;
+  document.getElementById('btn-cancel-run').hidden = true;
+  document.getElementById('run-cancel-status').hidden = true;
+
+  let sites = [];
+  try {
+    ({ sites } = await fetchJson(`/api/runs/${encodeURIComponent(runId)}/sites`));
+  } catch {
+    sites = [];
+  }
+  renderRunSitesTable(runId, sites);
+  await renderRunReportBlock(runId);
+}
+
+async function renderRunReportBlock(runId) {
+  const block = document.getElementById('run-report-block');
+  try {
+    const report = await fetchJson(`/api/runs/${encodeURIComponent(runId)}/report`);
+    block.hidden = false;
+    document.getElementById('run-report-dir').textContent = `报告目录：${report.dir}`;
+    document.getElementById('run-report-stats').textContent =
+      `新增 ${report.stats.addedTotal}（game ${report.stats.gameCount} / non_game ${report.stats.nonGameCount} / unknown ${report.stats.unknownCount}），分类失败 ${report.stats.classificationErrors}`;
+    const list = document.getElementById('run-report-files');
+    list.replaceChildren();
+    for (const filename of Object.values(report.files)) {
+      const li = document.createElement('li');
+      const a = document.createElement('a');
+      a.href = `/api/runs/${encodeURIComponent(runId)}/report/${encodeURIComponent(filename)}`;
+      a.textContent = filename;
+      li.append(a);
+      list.append(li);
+    }
+  } catch {
+    // 运行被取消、还没跑到报告阶段（REPORT_NOT_READY）等情况：不展示报告区块，
+    // 不当成错误提示给用户——本来就没有报告可看。
+    block.hidden = true;
+  }
+}
+
+function renderRunSitesTable(runId, sites) {
+  state.run.currentRunId = runId;
+  state.run.currentSites = sites;
+  applyRunSitesFilter();
+}
+
+function applyRunSitesFilter() {
+  if (!state.run.currentSites) return;
+  const search = document.getElementById('run-site-search').value.trim().toLowerCase();
+  const statusFilter = document.getElementById('run-site-filter-status').value;
+  const onlyAdded = document.getElementById('run-site-filter-added').checked;
+  const runId = state.run.currentRunId;
+
+  const filtered = state.run.currentSites.filter((s) => {
+    if (search && !s.siteId.toLowerCase().includes(search) && !(s.domain || '').toLowerCase().includes(search)) return false;
+    if (statusFilter && s.status !== statusFilter) return false;
+    if (onlyAdded && !(s.addedUrlCount > 0)) return false;
+    return true;
+  });
+
+  const tbody = document.querySelector('#run-sites-table tbody');
+  tbody.replaceChildren();
+  if (filtered.length === 0) {
+    tbody.append(rowWithMessage(9, '没有符合条件的站点'));
+    return;
+  }
+  for (const s of filtered) {
+    const tr = document.createElement('tr');
+    const addedTd = el('td', { text: String(s.addedUrlCount ?? 0) });
+    if (s.addedUrlCount > 0) addedTd.className = 'has-added';
+    tr.append(
+      el('td', { text: String(s.index) }),
+      el('td', { text: s.domain ? `${s.siteId} (${s.domain})` : s.siteId }),
+      wrapCell(statusBadge(s.status)),
+      el('td', { text: String(s.pageUrlCount ?? 0) }),
+      addedTd,
+      el('td', { text: s.isBaseline === true ? '是' : s.isBaseline === false ? '否' : '-' }),
+      el('td', { text: s.durationMs != null ? `${(s.durationMs / 1000).toFixed(1)}s` : '-' }),
+      el('td', { text: s.errorSummary || '-' }),
+    );
+    const actionsTd = el('td');
+    if (s.addedUrlCount > 0) {
+      const btn = el('button', { text: '查看新增' });
+      btn.addEventListener('click', () => openRunChanges(runId, s.siteId));
+      actionsTd.append(btn);
+    }
+    tr.append(actionsTd);
+    tbody.append(tr);
+  }
+}
+
+async function cancelActiveRun(runId) {
+  const confirmed = confirm(
+    '确定要安全停止当前监控任务吗？\n\n当前正在处理的网站会正常完成，不会立即中断网络请求，后续尚未开始的站点将不再调度。',
+  );
+  if (!confirmed) return;
+  try {
+    await apiMutate(`/api/runs/${encodeURIComponent(runId)}/cancel`, 'POST', {});
+    refreshRunView();
+  } catch (err) {
+    alert(`停止失败：${err.message}`);
+  }
+}
+
+async function startRun({ mode, siteIds }) {
+  try {
+    const payload = mode === 'all' ? { mode: 'all' } : { mode: 'selected', siteIds };
+    const result = await apiMutate('/api/runs', 'POST', payload);
+    state.run.viewingRunId = result.runId;
+    switchToTab('run');
+    refreshRunView();
+  } catch (err) {
+    if (err.code === 'RUN_ALREADY_ACTIVE') {
+      // 不是单纯报错，而是直接带用户去看那个正在进行的运行。
+      state.run.viewingRunId = err.details.activeRunId || null;
+      switchToTab('run');
+      refreshRunView();
+    } else if (err.status === 422) {
+      alert(`站点选择不合法：${err.message}`);
+    } else {
+      alert(`启动失败：${err.message}`);
+    }
+  }
+}
+
+async function onStartAllClick() {
+  let overview = null;
+  try {
+    overview = await fetchJson('/api/overview');
+  } catch {
+    // 拿不到也不阻塞，确认框里显示"?"，真正的校验交给服务端。
+  }
+  const enabledCount = overview ? overview.enabledCount : '?';
+  const lastSummary = await getLastFullRunSummary();
+  const lastLine = lastSummary
+    ? `上次全量运行耗时约 ${lastSummary.durationSec} 秒（${formatTime(lastSummary.startedAt)}）。`
+    : '暂无历史全量运行记录。';
+  const confirmed = confirm(
+    `将监控全部 ${enabledCount} 个已启用站点，是否继续？\n\n` +
+      `${lastLine}\n` +
+      '站点较多时可能占用较多内存和磁盘空间。\n' +
+      '关闭浏览器不会停止后台运行，可以随时重新打开面板查看进度。',
+  );
+  if (!confirmed) return;
+  await startRun({ mode: 'all' });
+}
+
+async function openRunChanges(runId, siteId, page = 1) {
+  showRunPanel('run-changes-panel');
+  document.getElementById('run-changes-title').textContent = `新增 URL：${siteId}`;
+  state.run.changesContext = { runId, siteId, page };
+  await loadRunChangesPage();
+}
+
+async function loadRunChangesPage() {
+  const { runId, siteId, page } = state.run.changesContext;
+  const tbody = document.querySelector('#run-changes-table tbody');
+  tbody.replaceChildren(rowWithMessage(4, '加载中...'));
+  try {
+    const data = await fetchJson(
+      `/api/runs/${encodeURIComponent(runId)}/changes?site_id=${encodeURIComponent(siteId)}&page=${page}&page_size=50`,
+    );
+    tbody.replaceChildren();
+    if (data.items.length === 0) {
+      tbody.append(rowWithMessage(4, '没有新增 URL'));
+    }
+    for (const item of data.items) {
+      const tr = document.createElement('tr');
+      tr.append(
+        el('td', { text: item.originalUrl }),
+        el('td', { text: item.pageType }),
+        el('td', { text: item.gameName || '-' }),
+        el('td', { text: formatTime(item.detectedAt) }),
+      );
+      tbody.append(tr);
+    }
+    renderRunChangesPagination(data.total, data.page, data.pageSize);
+  } catch (err) {
+    tbody.replaceChildren(rowWithMessage(4, `加载失败：${err.message}`));
+  }
+}
+
+function renderRunChangesPagination(total, page, pageSize) {
+  const container = document.getElementById('run-changes-pagination');
+  container.replaceChildren();
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  if (totalPages <= 1) return;
+  for (let p = 1; p <= totalPages; p++) {
+    const btn = el('button', { text: String(p), className: p === page ? 'page-btn active' : 'page-btn' });
+    btn.addEventListener('click', () => {
+      state.run.changesContext.page = p;
+      loadRunChangesPage();
+    });
+    container.append(btn);
+  }
+}
+
+/** 桌面快捷方式打开 ?action=start-all：点击快捷方式本身就是用户的明确意图，这里不再弹二次确认框。 */
+async function handleStartAllQueryParam() {
+  const params = new URLSearchParams(location.search);
+  params.delete('action');
+  const newSearch = params.toString();
+  history.replaceState(null, '', location.pathname + (newSearch ? `?${newSearch}` : '') + location.hash);
+
+  switchToTab('run');
+  try {
+    const { active } = await fetchJson('/api/runs/active');
+    if (active) {
+      state.run.viewingRunId = active.runId;
+      refreshRunView();
+      return;
+    }
+  } catch {
+    // 查询失败也继续尝试启动，服务端会给出明确错误提示。
+  }
+  await startRun({ mode: 'all' });
+}
+
+/** 页面刚加载、没有 ?action=start-all 时：如果已经有活动运行，自动切到实时运行页，不用用户自己找。 */
+async function initialRunCheck() {
+  try {
+    const { active } = await fetchJson('/api/runs/active');
+    if (active) {
+      state.run.viewingRunId = active.runId;
+      switchToTab('run');
+    }
+  } catch {
+    // 拿不到就当没有活动运行，留在默认的总览页。
+  }
+}
+
 // ---- SSE ----
 
 function connectEvents() {
   const statusEl = document.getElementById('conn-status');
   const source = new EventSource('/api/events');
+  let everDisconnected = false;
   source.addEventListener('connected', () => {
     statusEl.textContent = '已连接';
     statusEl.className = 'conn-status connected';
+    // SSE 断线重连后，浏览器原生的 EventSource 会自动发起新连接、再收到一次
+    // connected 事件；这个窗口里可能错过了若干个运行事件，必须重新拉取一次
+    // 权威快照，不能假装什么都没发生过——不重连补一次的话，运行进度/统计
+    // 会停在断线前的最后一次画面，直到下一个事件恰好到达才会更新。
+    if (everDisconnected) refreshRunView();
   });
   source.addEventListener('heartbeat', () => {
     statusEl.textContent = '已连接';
     statusEl.className = 'conn-status connected';
   });
+  RUN_EVENT_NAMES.forEach((name) => {
+    source.addEventListener(name, () => refreshRunView());
+  });
   source.onerror = () => {
+    everDisconnected = true;
     statusEl.textContent = '连接断开，重连中...';
     statusEl.className = 'conn-status disconnected';
   };
@@ -739,9 +1270,18 @@ async function init() {
   setupTabs();
   setupSiteListControls();
   setupSiteForm();
+  setupRunTabControls();
   loadOverview();
   loadRuns();
   connectEvents();
+
+  const params = new URLSearchParams(location.search);
+  if (params.get('action') === 'start-all') {
+    await handleStartAllQueryParam();
+  } else {
+    await initialRunCheck();
+  }
+
   setInterval(() => {
     loadOverview();
     loadRuns();

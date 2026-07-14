@@ -237,3 +237,124 @@ test('crawl_runs 汇总：sites_total/success/partial/failed 与 baseline 统计
     assert.ok(row.finished_at);
   });
 });
+
+// ---- Dashboard M3：onEvent / shouldCancel ----
+
+test('Dashboard M3：onEvent 按顺序发出 site_started/sitemap_discovered/site_finished，字段完整', async () => {
+  await withTempDb(async (db) => {
+    const s1 = insertSite(db, 's1', 's1.com');
+    const s2 = insertSite(db, 's2', 's2.com');
+    const events = [];
+    const result = await runCollect(db, {
+      sites: [s1, s2],
+      runId: 'run-evt',
+      collectSiteFn: async (p) => completeResult(p.siteId, [`https://${p.siteId}.com/g/a`]),
+      onEvent: (type, payload) => events.push({ type, payload }),
+    });
+    assert.equal(result.cancelled, false);
+
+    const types = events.map((e) => e.type);
+    assert.deepEqual(types, [
+      'site_started', 'sitemap_discovered', 'site_finished',
+      'site_started', 'sitemap_discovered', 'site_finished',
+    ]);
+
+    const firstStarted = events[0];
+    assert.equal(firstStarted.payload.runId, 'run-evt');
+    assert.equal(firstStarted.payload.siteId, 's1');
+    assert.equal(firstStarted.payload.domain, 's1.com');
+    assert.equal(firstStarted.payload.index, 1);
+    assert.equal(firstStarted.payload.total, 2);
+    assert.ok(firstStarted.payload.startedAt);
+
+    const firstFinished = events[2];
+    assert.equal(firstFinished.payload.siteId, 's1');
+    assert.equal(firstFinished.payload.status, 'success');
+    assert.equal(firstFinished.payload.complete, true);
+    assert.equal(firstFinished.payload.truncated, false);
+    assert.equal(firstFinished.payload.pageUrlCount, 1);
+    assert.equal(firstFinished.payload.addedUrlCount, 0); // 首次 baseline，added 恒为 0
+    assert.equal(firstFinished.payload.isBaseline, true);
+    assert.equal(typeof firstFinished.payload.durationMs, 'number');
+    assert.equal(firstFinished.payload.errorCode, null);
+  });
+});
+
+test('Dashboard M3：失败站点也会发出 site_finished（带 errorCode/errorSummary）', async () => {
+  await withTempDb(async (db) => {
+    const s1 = insertSite(db, 's1', 's1.com');
+    const events = [];
+    await runCollect(db, {
+      sites: [s1],
+      runId: 'run-evt-fail',
+      collectSiteFn: async () => { throw new Error('网络超时'); },
+      onEvent: (type, payload) => events.push({ type, payload }),
+    });
+    const finished = events.find((e) => e.type === 'site_finished');
+    assert.equal(finished.payload.status, 'failed');
+    assert.equal(finished.payload.errorCode, 'COLLECT_THREW');
+    assert.match(finished.payload.errorSummary, /网络超时/);
+  });
+});
+
+test('Dashboard M3：onEvent 回调本身抛错不影响正式采集结果', async () => {
+  await withTempDb(async (db) => {
+    const s1 = insertSite(db, 's1', 's1.com');
+    const result = await runCollect(db, {
+      sites: [s1],
+      runId: 'run-evt-throw',
+      collectSiteFn: async (p) => completeResult(p.siteId, ['https://s1.com/g/a']),
+      onEvent: () => { throw new Error('前端已断开，事件发送失败'); },
+    });
+    assert.equal(result.status, 'success');
+    assert.equal(result.stats.sitesSuccess, 1);
+    const row = db.prepare('SELECT * FROM crawl_runs WHERE run_id = ?').get('run-evt-throw');
+    assert.equal(row.status, 'success');
+  });
+});
+
+test('Dashboard M3：shouldCancel 在下一站开始前生效——当前站正常跑完并写入历史，后续站不再调度', async () => {
+  await withTempDb(async (db) => {
+    const s1 = insertSite(db, 's1', 's1.com');
+    const s2 = insertSite(db, 's2', 's2.com');
+    const s3 = insertSite(db, 's3', 's3.com');
+    let started = 0;
+    const result = await runCollect(db, {
+      sites: [s1, s2, s3],
+      runId: 'run-cancel',
+      collectSiteFn: async (p) => {
+        started++;
+        return completeResult(p.siteId, [`https://${p.siteId}.com/g/a`]);
+      },
+      shouldCancel: () => started >= 1, // 第一站跑完后才允许取消检查生效
+    });
+    assert.equal(started, 1, '只应该开始了第一个站点的采集，其余站点不应该被调度');
+    assert.equal(result.cancelled, true);
+    assert.equal(result.status, 'cancelled');
+    assert.equal(result.stats.sitesSuccess, 1);
+
+    // 已经完成的第一站历史正常写入，不因为取消而丢失。
+    const s1Row = db.prepare('SELECT * FROM seen_urls WHERE site_id = ?').get('s1');
+    assert.ok(s1Row);
+    const s2Row = db.prepare('SELECT * FROM site_crawl_runs WHERE run_id = ? AND site_id = ?').get('run-cancel', 's2');
+    assert.equal(s2Row, undefined, '未开始的站点不应该有任何运行记录');
+
+    const runRow = db.prepare('SELECT * FROM crawl_runs WHERE run_id = ?').get('run-cancel');
+    assert.equal(runRow.status, 'cancelled');
+    assert.equal(runRow.sites_success, 1);
+  });
+});
+
+test('Dashboard M3：不传 shouldCancel 时行为不变（永远不取消）', async () => {
+  await withTempDb(async (db) => {
+    const s1 = insertSite(db, 's1', 's1.com');
+    const s2 = insertSite(db, 's2', 's2.com');
+    const result = await runCollect(db, {
+      sites: [s1, s2],
+      runId: 'run-no-cancel',
+      collectSiteFn: async (p) => completeResult(p.siteId, [`https://${p.siteId}.com/g/a`]),
+    });
+    assert.equal(result.cancelled, false);
+    assert.equal(result.stats.sitesSuccess, 2);
+  });
+});

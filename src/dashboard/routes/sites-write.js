@@ -12,18 +12,28 @@ import { LIMIT_FIELD_MAP, SITE_LIMITS_CSV_HEADERS, SITE_SITEMAPS_CSV_HEADERS } f
 
 /** 应用错误：携带一个语义化的错误码，供路由层映射 HTTP 状态码。 */
 export class ApiError extends Error {
-  constructor(code, message, { status, fieldErrors } = {}) {
+  constructor(code, message, { status, fieldErrors, extra } = {}) {
     super(message);
     this.code = code;
     this.status = status || 500;
     this.fieldErrors = fieldErrors;
+    // Dashboard M3：极少数错误需要在 error 对象上附带业务字段（例如
+    // RUN_ALREADY_ACTIVE 要带 activeRunId，方便前端直接跳转到那个运行，
+    // 而不是只报错）。字段名和 fieldErrors 保持互不冲突，spread 时不覆盖。
+    this.extra = extra;
   }
 }
 
-function toApiError(err) {
+/**
+ * 统一错误映射：把各模块抛出的具体错误类型翻译成 ApiError（决定 HTTP 状态码）。
+ * 导出供其它路由模块（runs-write.js 等）复用，避免每个模块各写一套映射规则。
+ */
+export function toApiError(err) {
   if (err instanceof ApiError) return err;
   if (err instanceof ValidationError) {
-    return new ApiError('VALIDATION_ERROR', err.message, { status: 422, fieldErrors: err.fieldErrors });
+    // 大多数校验失败用统一的 VALIDATION_ERROR 码；少数场景（比如 Dashboard
+    // M3 的站点选择校验）会在 ValidationError 上附带更具体的 code。
+    return new ApiError(err.code || 'VALIDATION_ERROR', err.message, { status: 422, fieldErrors: err.fieldErrors });
   }
   if (err instanceof ConfigVersionConflictError) {
     return new ApiError('CONFIG_VERSION_CONFLICT', err.message, { status: 409 });

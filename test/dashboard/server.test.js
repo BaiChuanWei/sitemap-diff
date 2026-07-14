@@ -5,11 +5,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { request as httpRequest } from 'node:http';
 import { loadLocalConfig } from '../../src/config.js';
-import { createDashboardServer, SERVICE_NAME } from '../../src/dashboard/server.js';
+import { SERVICE_NAME } from '../../src/dashboard/server.js';
+import { createAndListenDashboard } from './helpers/listen-with-retry.js';
 
 const SITES_HEADER = 'site_id,domain,priority,enabled,robots_url,sitemap_url,expected_game_path,notes,site_category';
 
-function withDashboard(fn, { port = 0, seed } = {}) {
+function withDashboard(fn, { seed } = {}) {
   return async () => {
     const dir = mkdtempSync(join(tmpdir(), 'dashboard-server-'));
     const config = loadLocalConfig({
@@ -21,13 +22,13 @@ function withDashboard(fn, { port = 0, seed } = {}) {
     });
     writeFileSync(config.sitesCsvPath, `${SITES_HEADER}\n`, 'utf-8');
     let dashboard;
+    let actualPort;
     try {
-      // 端口 0 = 由操作系统分配空闲端口，避免测试间冲突；但本项目的 Host
-      // 校验依赖固定端口号，所以这里改用一个较少被占用的高位端口固定测试。
-      const actualPort = port || 28711 + Math.floor(Math.random() * 500);
-      dashboard = createDashboardServer({ config, port: actualPort });
+      // 端口固定用高位随机数（本项目 Host 校验依赖构造时就确定端口，不能
+      // 用 listen(0) 交给操作系统分配）；多个 dashboard 测试文件并发跑时
+      // 随机端口小概率撞车，由 createAndListenDashboard 自动换端口重试。
+      ({ dashboard, port: actualPort } = await createAndListenDashboard({ config }));
       if (seed) seed(dashboard.db);
-      await dashboard.listen();
       await fn({ dashboard, port: actualPort, config });
     } finally {
       if (dashboard) await dashboard.close();

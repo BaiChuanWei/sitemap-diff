@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadLocalConfig } from '../../src/config.js';
-import { createDashboardServer } from '../../src/dashboard/server.js';
+import { createAndListenDashboard } from './helpers/listen-with-retry.js';
 import { _resetDiagnosisRegistryForTests } from '../../src/dashboard/routes/diagnose-write.js';
 
 const SITES_HEADER = 'site_id,domain,priority,enabled,robots_url,sitemap_url,expected_game_path,notes,site_category';
@@ -21,13 +21,11 @@ function withDashboard(fn) {
       outputDir: join(dir, 'output'),
     });
     writeFileSync(config.sitesCsvPath, `${SITES_HEADER}\npoki,poki.com,high,true,,,,,\n`, 'utf-8');
-    const port = 28711 + Math.floor(Math.random() * 500);
     // 诊断走 fetchImpl 注入，绝不发起真实网络请求（自动测试硬性要求）：
     // 立刻返回 404，让 diagnoseSite() 快速走完"没有发现 Sitemap"的路径。
     const diagnoseFetchImpl = async () => new Response('not found', { status: 404 });
-    const dashboard = createDashboardServer({ config, port, logDir: join(dir, 'logs'), diagnoseFetchImpl });
+    const { dashboard, port } = await createAndListenDashboard({ config, logDir: join(dir, 'logs'), diagnoseFetchImpl });
     try {
-      await dashboard.listen();
       const healthRes = await fetch(`http://127.0.0.1:${port}/api/health`, { headers: { host: `127.0.0.1:${port}` } });
       const health = (await healthRes.json()).data;
       await fn({ port, config, dir, token: health.sessionToken });
@@ -87,10 +85,8 @@ test('对抗场景：服务重启后旧 CSRF token 失效——换一个新实�
   // token 是"每次服务启动生成一次"，用另一个 dashboard 实例（模拟"面板服务
   // 重启后，浏览器页面还没刷新、带着重启前的旧 token 发请求"）的 token 去
   // 打第一个实例，必须被拒绝，不能因为"look like a valid random token"就放行。
-  const otherPort = 28711 + Math.floor(Math.random() * 500) + 1500;
-  const otherDashboard = createDashboardServer({ config, port: otherPort, logDir: join(dir, 'logs') });
+  const { dashboard: otherDashboard } = await createAndListenDashboard({ config, logDir: join(dir, 'logs') });
   try {
-    await otherDashboard.listen();
     const staleToken = otherDashboard.sessionToken;
     const res = await fetch(`http://127.0.0.1:${port}/api/sites`, {
       method: 'POST',
@@ -388,10 +384,8 @@ test('POST /api/sites/:id/diagnose：同站重复诊断被抑制（409）', with
   // 诊断可能已经跑完，测不出"重复诊断被抑制"这个场景，所以这里单独起
   // 一个带人工延迟的 dashboard 实例。
   const slowFetchImpl = () => new Promise((resolve) => setTimeout(() => resolve(new Response('not found', { status: 404 })), 300));
-  const slowPort = 28711 + Math.floor(Math.random() * 500) + 1000;
-  const slowDashboard = createDashboardServer({ config, port: slowPort, logDir: join(dir, 'logs'), diagnoseFetchImpl: slowFetchImpl });
+  const { dashboard: slowDashboard, port: slowPort } = await createAndListenDashboard({ config, logDir: join(dir, 'logs'), diagnoseFetchImpl: slowFetchImpl });
   try {
-    await slowDashboard.listen();
     const slowToken = slowDashboard.sessionToken;
     const first = await fetch(`http://127.0.0.1:${slowPort}/api/sites/poki/diagnose`, { method: 'POST', headers: jsonHeaders(slowPort, slowToken), body: '{}' });
     assert.equal(first.status, 202);
