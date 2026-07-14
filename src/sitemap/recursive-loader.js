@@ -103,7 +103,8 @@ export async function loadSitemapsRecursively({ entryPoints, limits, fetchImpl }
 
     let parsed;
     try {
-      parsed = parseSitemapXml(fetchResult.text);
+      // 用重定向后的 finalUrl 作为相对 <loc> 的解析基准（更准确，重定向可能换了 host）。
+      parsed = parseSitemapXml(fetchResult.text, { baseUrl: fetchResult.finalUrl || normalized });
     } catch (err) {
       const code = err instanceof SitemapParseError ? err.code : 'PARSE_ERROR';
       recordFailure(item, {

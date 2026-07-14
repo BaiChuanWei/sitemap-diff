@@ -101,3 +101,26 @@ test('嵌套 Sitemap Index：本身也是合法的 sitemapindex，递归留给 r
   assert.equal(result.type, 'sitemapindex');
   assert.deepEqual(result.locations, ['https://example-games.test/sitemap-index.xml']);
 });
+
+test('相对路径 <loc>（不带 baseUrl）：不是合法绝对 URL，按旧行为忽略', () => {
+  // 真实案例：julgames.com 的 sitemap 用 <loc>/g/xxx</loc> 这种根相对路径，
+  // 不符合 Sitemap 协议规范（要求绝对 URL），但真实存在。不传 baseUrl 时
+  // 保持原样：不是绝对 URL 就不采信，避免猜出错误的域名。
+  const result = parseSitemapXml(fixture('urlset-relative-loc.xml'));
+  assert.equal(result.type, 'urlset');
+  assert.deepEqual(result.locations, []);
+  assert.equal(result.warnings.length, 4);
+});
+
+test('相对路径 <loc>（带 baseUrl）：以根相对路径 / 开头的会解析成绝对 URL，其余乱码字符串仍被忽略', () => {
+  const result = parseSitemapXml(fixture('urlset-relative-loc.xml'), {
+    baseUrl: 'https://julgames.com/sitemap.xml',
+  });
+  assert.equal(result.type, 'urlset');
+  assert.deepEqual(result.locations, [
+    'https://julgames.com/',
+    'https://julgames.com/g/relative-game-one',
+    'https://julgames.com/g/relative-game-two',
+  ]);
+  assert.equal(result.warnings.length, 1, '"not a url at all with spaces" 不像路径，仍应被忽略并产生 1 条警告');
+});

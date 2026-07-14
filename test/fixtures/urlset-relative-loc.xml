@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>/</loc></url>
+  <url><loc>/g/relative-game-one</loc></url>
+  <url><loc>/g/relative-game-two</loc></url>
+  <url><loc>not a url at all with spaces</loc></url>
+</urlset>

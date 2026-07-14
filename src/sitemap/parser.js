@@ -12,10 +12,18 @@ const xmlParser = new XMLParser({
  * 解析一份 Sitemap XML 文本，区分 urlset 和 sitemapindex。
  * 未知根元素、无法解析的 XML 都会抛出 SitemapParseError，不做猜测。
  *
+ * options.baseUrl：可选，该 Sitemap 文件自身的 URL。Sitemap 协议规范要求
+ * <loc> 必须是绝对 URL，但真实站点里确实存在用根相对路径（如 <loc>/g/x</loc>，
+ * 例如 julgames.com）的情况。传入 baseUrl 后，只有明确像根相对路径
+ * （以 / 开头、不含空白）的 <loc> 才会按浏览器解析相对链接的方式解析成
+ * 绝对 URL；不传 baseUrl 或不像路径的字符串，行为与之前完全一致（忽略）。
+ *
  * 返回：{ type: 'urlset' | 'sitemapindex', locations: string[], warnings: string[] }
  * locations 已经在本文件范围内去重（同一份 XML 内的重复 <loc>）。
  */
-export function parseSitemapXml(xmlText) {
+export function parseSitemapXml(xmlText, options = {}) {
+  const { baseUrl } = options;
+
   const validation = XMLValidator.validate(xmlText, { allowBooleanAttributes: true });
   if (validation !== true) {
     const detail = validation?.err?.msg || '未知的 XML 格式错误';
@@ -30,11 +38,11 @@ export function parseSitemapXml(xmlText) {
   }
 
   if (parsed.urlset !== undefined) {
-    return extractLocSet(parsed.urlset, 'url', '缺少合法 <loc>，已忽略该 <url> 条目', 'urlset');
+    return extractLocSet(parsed.urlset, 'url', '缺少合法 <loc>，已忽略该 <url> 条目', 'urlset', baseUrl);
   }
 
   if (parsed.sitemapindex !== undefined) {
-    return extractLocSet(parsed.sitemapindex, 'sitemap', '缺少合法 <loc>，已忽略该 <sitemap> 条目', 'sitemapindex');
+    return extractLocSet(parsed.sitemapindex, 'sitemap', '缺少合法 <loc>，已忽略该 <sitemap> 条目', 'sitemapindex', baseUrl);
   }
 
   const rootKeys = Object.keys(parsed).filter((k) => k !== '?xml');
@@ -44,14 +52,14 @@ export function parseSitemapXml(xmlText) {
   );
 }
 
-function extractLocSet(root, childKey, warningText, type) {
+function extractLocSet(root, childKey, warningText, type, baseUrl) {
   const entries = normalizeArray(root?.[childKey]);
   const seen = new Set();
   const locations = [];
   const warnings = [];
 
   for (const entry of entries) {
-    const loc = extractLoc(entry);
+    const loc = extractLoc(entry, baseUrl);
     if (!loc) {
       warnings.push(warningText);
       continue;
@@ -69,20 +77,31 @@ function normalizeArray(value) {
   return Array.isArray(value) ? value : [value];
 }
 
-function extractLoc(entry) {
+function extractLoc(entry, baseUrl) {
   if (entry === undefined || entry === null) return null;
   let loc = typeof entry === 'object' ? entry.loc : undefined;
   if (loc && typeof loc === 'object') loc = loc['#text'];
   if (typeof loc !== 'string') return null;
   const trimmed = loc.trim();
-  return isHttpUrl(trimmed) ? trimmed : null;
+  return resolveHttpUrl(trimmed, baseUrl);
 }
 
-function isHttpUrl(value) {
+function resolveHttpUrl(value, baseUrl) {
+  const absolute = tryParseHttpUrl(value);
+  if (absolute) return absolute;
+  // 只有明确像根相对路径的字符串（以 / 开头、不含空白）才尝试相对解析，
+  // 避免把不相关的乱码文本误当成 URL。
+  if (baseUrl && /^\/\S*$/.test(value)) {
+    return tryParseHttpUrl(value, baseUrl);
+  }
+  return null;
+}
+
+function tryParseHttpUrl(value, base) {
   try {
-    const u = new URL(value);
-    return u.protocol === 'http:' || u.protocol === 'https:';
+    const u = base ? new URL(value, base) : new URL(value);
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.toString() : null;
   } catch {
-    return false;
+    return null;
   }
 }
