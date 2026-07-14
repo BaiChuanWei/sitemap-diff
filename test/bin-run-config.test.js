@@ -4,7 +4,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadLocalConfig } from '../src/config.js';
-import { loadRecords } from '../bin/run.js';
+import { loadRecords, saveDiagnostics } from '../bin/run.js';
+import { readFileSync } from 'node:fs';
 
 /**
  * --inspect-site 和 --collect 内部都是：
@@ -84,5 +85,17 @@ test('sitesCsvPath 指向不存在的文件：loadRecords 返回 null 并给出�
     assert.equal(records, null, '文件不存在时应该返回 null，而不是抛异常或返回空数组');
     assert.ok(logs.some((l) => l.includes(missingPath)), '错误信息应该包含具体路径，方便定位');
     assert.ok(logs.some((l) => l.includes('sites.example.csv')), '错误信息应该提示可以从示例模板复制');
+  });
+});
+
+test('Milestone 5A-P1-B：saveDiagnostics 把诊断结果写到 output/diagnostics/<date>/<site_id>.json', () => {
+  withTempDir((dir) => {
+    const config = loadLocalConfig({ outputDir: dir });
+    const fakeDiag = { status: 'success', pageUrlCount: 42 };
+    const savedPath = saveDiagnostics(config, 'test-site', fakeDiag);
+
+    assert.match(savedPath, /diagnostics[/\\]\d{4}-\d{2}-\d{2}[/\\]test-site\.json$/);
+    const parsed = JSON.parse(readFileSync(savedPath, 'utf-8'));
+    assert.deepEqual(parsed, fakeDiag);
   });
 });

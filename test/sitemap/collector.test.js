@@ -125,6 +125,91 @@ test('Milestone 5A-P1：手工 Endpoint 失败时正确产生 partial，不拖�
   }
 });
 
+// Milestone 5A-P1-B 一：确认 manual_only 下 status 语义与来源无关，完全复用
+// recursive-loader.js 既有的"全部成功→success / 部分成功→partial / 全部
+// 失败→failed"规则（该规则本身不区分 Endpoint 是手工配置还是自动发现）。
+test('manual_only：单 Endpoint 失败 → failed', async () => {
+  const { url, close } = await startTestServer(createRouter({ '/broken.xml': () => ({ status: 404, body: 'nope' }) }));
+  try {
+    const result = await collectSite({
+      siteId: 'x',
+      manualSitemaps: [`${url}/broken.xml`],
+      discoveryMode: 'manual_only',
+      limits: fastLimits(),
+    });
+    assert.equal(result.status, 'failed');
+    assert.equal(result.complete, false);
+    assert.equal(result.pageUrlCount, 0);
+  } finally {
+    await close();
+  }
+});
+
+test('manual_only：多 Endpoint 部分失败 → partial', async () => {
+  const { url, close } = await startTestServer(
+    createRouter({
+      '/good.xml': () => ({ body: urlsetXml([`${url}/g/a`]) }),
+      '/broken.xml': () => ({ status: 404, body: 'nope' }),
+    }),
+  );
+  try {
+    const result = await collectSite({
+      siteId: 'x',
+      manualSitemaps: [`${url}/good.xml`, `${url}/broken.xml`],
+      discoveryMode: 'manual_only',
+      limits: fastLimits(),
+    });
+    assert.equal(result.status, 'partial');
+    assert.equal(result.complete, false);
+    assert.deepEqual(result.pageUrls, [`${url}/g/a`]);
+  } finally {
+    await close();
+  }
+});
+
+test('manual_only：多 Endpoint 全部失败 → failed', async () => {
+  const { url, close } = await startTestServer(
+    createRouter({
+      '/broken1.xml': () => ({ status: 404, body: 'nope' }),
+      '/broken2.xml': () => ({ status: 500, body: 'nope' }),
+    }),
+  );
+  try {
+    const result = await collectSite({
+      siteId: 'x',
+      manualSitemaps: [`${url}/broken1.xml`, `${url}/broken2.xml`],
+      discoveryMode: 'manual_only',
+      limits: fastLimits(),
+    });
+    assert.equal(result.status, 'failed');
+    assert.equal(result.pageUrlCount, 0);
+  } finally {
+    await close();
+  }
+});
+
+test('manual_only：多 Endpoint 全部成功且非空 → success', async () => {
+  const { url, close } = await startTestServer(
+    createRouter({
+      '/a.xml': () => ({ body: urlsetXml([`${url}/g/a`]) }),
+      '/b.xml': () => ({ body: urlsetXml([`${url}/g/b`]) }),
+    }),
+  );
+  try {
+    const result = await collectSite({
+      siteId: 'x',
+      manualSitemaps: [`${url}/a.xml`, `${url}/b.xml`],
+      discoveryMode: 'manual_only',
+      limits: fastLimits(),
+    });
+    assert.equal(result.status, 'success');
+    assert.equal(result.complete, true);
+    assert.deepEqual(result.pageUrls.sort(), [`${url}/g/a`, `${url}/g/b`]);
+  } finally {
+    await close();
+  }
+});
+
 test('没有发现任何 Sitemap 入口：状态为 failed，不会抛异常', async () => {
   const { url, close } = await startTestServer(createRouter({}));
   try {

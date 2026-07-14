@@ -1,0 +1,5 @@
+site_id,max_download_bytes,max_decompressed_bytes,max_page_urls,max_sitemap_endpoints,max_depth,request_timeout_ms
+kongregate,62914560,,,,,
+playgama,52428800,,,,,
+playhop,,,850000,300,,
+lagged,47185920,,,,,

@@ -310,7 +310,21 @@ async function runDiagnoseSite(siteId) {
   console.log(`是否触及限制: ${diag.hitLimits}`);
   console.log(`错误: ${diag.errorCode ? `[${diag.errorCode}] ${diag.errorMessage}` : '(无)'}`);
   console.log(`推荐处理类型: ${diag.recommendedAction}`);
+
+  const savedPath = saveDiagnostics(config, site.site_id, diag);
+  console.log('');
+  console.log(`诊断结果已保存: ${savedPath}`);
   process.exitCode = 0;
+}
+
+/** 保存诊断结果为结构化 JSON，只读命令的产物，与 baseline/seen_urls/added_urls 无关。 */
+export function saveDiagnostics(config, siteId, diag) {
+  const dateStamp = new Date().toISOString().slice(0, 10);
+  const dir = join(config.outputDir, 'diagnostics', dateStamp);
+  mkdirSync(dir, { recursive: true });
+  const filePath = join(dir, `${siteId}.json`);
+  writeFileSync(filePath, JSON.stringify(diag, null, 2), 'utf-8');
+  return filePath;
 }
 
 async function runInspectUrl(url) {

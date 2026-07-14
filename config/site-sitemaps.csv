@@ -1,0 +1,4 @@
+site_id,sitemap_url,enabled,mode,notes,verified_at
+lagged,https://lagged.com/sitemap.xml,true,manual_only,robots.txt声明的/sitemap.txt返回406被拦截；此地址已用curl独立验证HTTP 200+合法urlset(12298个loc)，2026-07-14实测确认,2026-07-14
+pbskids,https://pbskids.org/sitemap/gamePages/1.xml,true,manual_only,来自pbskids.org公开Sitemap Index中明确声明的gamePages子Sitemap(1/2)，只采集游戏相关内容，不采集kidsPages/videoPages/seriesPages等无关内容；已用curl独立验证HTTP 200+合法urlset，1.xml含20个真实游戏URL，2026-07-14实测确认,2026-07-14
+pbskids,https://pbskids.org/sitemap/gamePages/2.xml,true,manual_only,同上；2.xml当前为空urlset(0个URL)但是Index中明确声明的合法Endpoint，随内容更新可能出现新URL，2026-07-14实测确认,2026-07-14
