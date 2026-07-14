@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDb } from '../src/db/index.js';
 import { runCollect, buildCollectParams } from '../src/collect-runner.js';
+import { parseSiteLimitOverrides, parseSiteSitemapOverrides } from '../src/site-overrides.js';
+import { DEFAULT_LIMITS } from '../src/sitemap/limits.js';
 
 async function withTempDb(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'm3-runner-'));
@@ -166,6 +168,51 @@ test('准入：status=success 但 pageUrlCount=0（零价值成功）不得计�
     const row = db.prepare('SELECT * FROM crawl_runs WHERE run_id = ?').get('run-1');
     assert.equal(row.sites_failed, 0);
     assert.equal(row.sites_partial, 1);
+  });
+});
+
+test('Milestone 5A-P1：站点级限制覆盖只影响该站，collectSiteFn 收到的 limits 各自独立', async () => {
+  await withTempDb(async (db) => {
+    const a = insertSite(db, 'kongregate', 'kongregate.com');
+    const b = insertSite(db, 'poki', 'poki.com');
+    const siteLimitOverrides = parseSiteLimitOverrides([{ site_id: 'kongregate', max_download_bytes: '52428800' }]);
+
+    const receivedLimits = {};
+    await runCollect(db, {
+      sites: [a, b],
+      runId: 'run-1',
+      siteLimitOverrides,
+      collectSiteFn: async (params) => {
+        receivedLimits[params.siteId] = params.limits;
+        return completeResult(params.siteId, [`https://${params.siteId}.com/g/a`]);
+      },
+    });
+
+    assert.equal(receivedLimits.kongregate.MAX_DOWNLOAD_BYTES, 52428800);
+    assert.equal(receivedLimits.poki.MAX_DOWNLOAD_BYTES, DEFAULT_LIMITS.MAX_DOWNLOAD_BYTES, '未覆盖的站点必须保持默认值');
+  });
+});
+
+test('Milestone 5A-P1：手工 Sitemap 配置（manual_only）正确传给 collectSiteFn', async () => {
+  await withTempDb(async (db) => {
+    const site = insertSite(db, 'lagged', 'lagged.com');
+    const siteSitemapOverrides = parseSiteSitemapOverrides([
+      { site_id: 'lagged', sitemap_url: 'https://lagged.com/sitemap.xml', enabled: 'true', mode: 'manual_only', notes: '', verified_at: '' },
+    ]);
+
+    let receivedParams;
+    await runCollect(db, {
+      sites: [site],
+      runId: 'run-1',
+      siteSitemapOverrides,
+      collectSiteFn: async (params) => {
+        receivedParams = params;
+        return completeResult('lagged', ['https://lagged.com/g/a']);
+      },
+    });
+
+    assert.deepEqual(receivedParams.manualSitemaps, ['https://lagged.com/sitemap.xml']);
+    assert.equal(receivedParams.discoveryMode, 'manual_only');
   });
 });
 

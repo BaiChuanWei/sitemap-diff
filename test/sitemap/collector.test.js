@@ -73,6 +73,58 @@ test('端到端截断：页面 URL 达到上限时，collector 透传 partial / 
   }
 });
 
+test('Milestone 5A-P1：discoveryMode=manual_only 时完全不碰 robots.txt/常见路径', async () => {
+  const { url, close } = await startTestServer(
+    createRouter({
+      '/robots.txt': () => ({ body: 'Sitemap: https://should-not-be-used.test/x.xml' }),
+      '/manual.xml': () => ({ body: urlsetXml(['https://example-games.test/g/manual-only-game']) }),
+    }),
+  );
+  try {
+    const result = await collectSite({
+      siteId: 'lagged',
+      baseUrl: url,
+      manualSitemaps: [`${url}/manual.xml`],
+      discoveryMode: 'manual_only',
+      limits: fastLimits(),
+    });
+    assert.equal(result.status, 'success');
+    assert.deepEqual(result.discoveredSitemaps, [`${url}/manual.xml`]);
+    assert.deepEqual(result.pageUrls, ['https://example-games.test/g/manual-only-game']);
+  } finally {
+    await close();
+  }
+});
+
+test('Milestone 5A-P1：手工 Endpoint 失败时正确产生 partial，不拖累/不伪装其它有效 Endpoint', async () => {
+  const base = { url: undefined };
+  const { url, close } = await startTestServer(
+    createRouter({
+      '/robots.txt': () => ({ body: `Sitemap: ${base.url}/good.xml` }),
+      '/good.xml': () => ({ body: urlsetXml([`${base.url}/g/a`]) }),
+      '/manual-broken.xml': () => ({ status: 404, body: 'not found' }),
+    }),
+  );
+  base.url = url;
+  try {
+    const result = await collectSite({
+      siteId: 'x',
+      baseUrl: url,
+      manualSitemaps: [`${url}/manual-broken.xml`],
+      discoveryMode: 'merge',
+      limits: fastLimits(),
+    });
+    // 手工 Endpoint 失败了，所以整站不能标记为完整 success；但正常的 robots 声明
+    // Endpoint 依然正确抓到了它自己的页面 URL，不会被手工 Endpoint 的失败拖累丢失。
+    assert.equal(result.status, 'partial');
+    assert.equal(result.complete, false, '手工 Endpoint 失败不能被伪装成完整 success');
+    assert.deepEqual(result.pageUrls, [`${url}/g/a`], '正常 Endpoint 的页面 URL 不受手工 Endpoint 失败影响');
+    assert.ok(result.failedSitemaps.some((e) => e.url === `${url}/manual-broken.xml`));
+  } finally {
+    await close();
+  }
+});
+
 test('没有发现任何 Sitemap 入口：状态为 failed，不会抛异常', async () => {
   const { url, close } = await startTestServer(createRouter({}));
   try {

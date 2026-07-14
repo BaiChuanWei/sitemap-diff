@@ -8,8 +8,12 @@ import { DEFAULT_LIMITS } from './limits.js';
  *
  * 输入三选一（可以同时提供 baseUrl + manualSitemapUrl）：
  *   - baseUrl：站点根地址，会走 robots.txt 发现 + 常见路径探测
- *   - manualSitemapUrl：手工指定的 Sitemap URL
+ *   - manualSitemapUrl：手工指定的单个 Sitemap URL（sites.csv 的 sitemap_url 列）
  *   - 两者都提供时会合并去重
+ *
+ * manualSitemaps（数组，来自 config/site-sitemaps.csv）+ discoveryMode：
+ *   - discoveryMode 未设置或 'merge'：手工 Endpoint 与自动发现结果合并去重
+ *   - discoveryMode 'manual_only'：完全跳过 robots.txt 声明和常见路径探测
  *
  * 返回结果里的完整性字段：
  *   - status: "success" | "partial" | "failed"
@@ -24,11 +28,27 @@ import { DEFAULT_LIMITS } from './limits.js';
  * 数为 0 的结果一律拒绝写入正式 URL 历史，只能记录运行错误和诊断信息（crawl run）。
  * 这条契约由本函数的返回结构保证，具体的写入准入判断由 Milestone 3 的存储层实现。
  */
-export async function collectSite({ siteId, domain, baseUrl, manualSitemapUrl, limits, fetchImpl } = {}) {
+export async function collectSite({
+  siteId,
+  domain,
+  baseUrl,
+  manualSitemapUrl,
+  manualSitemaps,
+  discoveryMode,
+  limits,
+  fetchImpl,
+} = {}) {
   const effectiveLimits = limits || DEFAULT_LIMITS;
   const startedAt = new Date();
 
-  const discovery = await discoverSitemaps({ baseUrl, manualSitemapUrl, limits: effectiveLimits, fetchImpl });
+  const discovery = await discoverSitemaps({
+    baseUrl,
+    manualSitemapUrl,
+    manualSitemaps,
+    mode: discoveryMode,
+    limits: effectiveLimits,
+    fetchImpl,
+  });
 
   if (discovery.sitemaps.length === 0) {
     const finishedAt = new Date();

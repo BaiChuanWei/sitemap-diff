@@ -7,6 +7,7 @@ import {
   recordRejectedSiteResult,
   isAdmissible,
 } from './storage/index.js';
+import { resolveSiteLimits, resolveSiteSitemaps } from './site-overrides.js';
 
 /**
  * 采集运行编排：遍历站点，逐站调用 Milestone 2 采集器，按准入规则决定
@@ -18,10 +19,16 @@ import {
  *   - 只有 isAdmissible 的完整成功结果才更新 seen_urls / added_urls / baseline，
  *     partial / failed / 截断 / 空结果只记录运行诊断。
  *
- * @param sites          站点行数组（至少含 site_id、domain，可选 sitemap_url）
- * @param collectSiteFn  可注入的采集函数（默认 Milestone 2 的 collectSite），便于测试
+ * @param sites               站点行数组（至少含 site_id、domain，可选 sitemap_url）
+ * @param collectSiteFn       可注入的采集函数（默认 Milestone 2 的 collectSite），便于测试
+ * @param limits              全局默认 limits（不传则用 DEFAULT_LIMITS）
+ * @param siteLimitOverrides  Milestone 5A-P1：站点级限制覆盖 Map（resolveSiteLimits 用）
+ * @param siteSitemapOverrides Milestone 5A-P1：手工 Sitemap 配置 Map（resolveSiteSitemaps 用）
  */
-export async function runCollect(db, { sites, runId = randomUUID(), collectSiteFn = collectSite, limits, now } = {}) {
+export async function runCollect(
+  db,
+  { sites, runId = randomUUID(), collectSiteFn = collectSite, limits, siteLimitOverrides, siteSitemapOverrides, now } = {},
+) {
   const startedAt = (now && now()) || new Date().toISOString();
   createCrawlRun(db, { runId, startedAt });
 
@@ -41,7 +48,14 @@ export async function runCollect(db, { sites, runId = randomUUID(), collectSiteF
     const ts = (now && now()) || new Date().toISOString();
     let result;
     try {
-      result = await collectSiteFn(buildCollectParams(site, limits));
+      const resolvedLimits = siteLimitOverrides ? resolveSiteLimits(site.site_id, siteLimitOverrides, limits) : limits;
+      const params = buildCollectParams(site, resolvedLimits);
+      if (siteSitemapOverrides) {
+        const { mode, urls } = resolveSiteSitemaps(site.site_id, siteSitemapOverrides);
+        if (urls.length) params.manualSitemaps = urls;
+        if (mode) params.discoveryMode = mode;
+      }
+      result = await collectSiteFn(params);
     } catch (err) {
       // 采集阶段抛错也不能终止整轮：构造一个 failed 结果继续
       result = failedResult(site, err);

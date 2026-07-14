@@ -1,8 +1,18 @@
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { existsSync, readFileSync } from 'node:fs';
+import { parseSiteLimitOverrides, parseSiteSitemapOverrides } from './site-overrides.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '..');
+
+function existsFile(path) {
+  return existsSync(path);
+}
+
+function readFileText(path) {
+  return readFileSync(path, 'utf-8');
+}
 
 export const SITES_CSV_HEADERS = [
   'site_id',
@@ -29,7 +39,25 @@ export function loadLocalConfig(overrides = {}) {
     sitesCsvPath: overrides.sitesCsvPath || resolve(projectRoot, 'config', 'sites.csv'),
     outputDir: overrides.outputDir || resolve(projectRoot, 'output'),
     lockPath: overrides.lockPath || resolve(projectRoot, 'data', 'collector.lock'),
+    // Milestone 5A-P1：两份都是可选覆盖文件，不存在时等同于"没有任何站点有覆盖"。
+    siteLimitsCsvPath: overrides.siteLimitsCsvPath || resolve(projectRoot, 'config', 'site-limits.csv'),
+    siteSitemapsCsvPath: overrides.siteSitemapsCsvPath || resolve(projectRoot, 'config', 'site-sitemaps.csv'),
   };
+}
+
+/**
+ * 加载站点级限制覆盖 + 手工 Sitemap 配置（Milestone 5A-P1）。文件不存在时
+ * 返回空 Map（等价于没有任何覆盖），文件存在但内容非法时直接抛错——
+ * 拒绝在错误配置下静默使用危险值。
+ */
+export function loadSiteOverrides(config, { knownSiteIds } = {}) {
+  const limitOverrides = existsFile(config.siteLimitsCsvPath)
+    ? parseSiteLimitOverrides(parseSitesCsv(readFileText(config.siteLimitsCsvPath)), { knownSiteIds })
+    : new Map();
+  const sitemapOverrides = existsFile(config.siteSitemapsCsvPath)
+    ? parseSiteSitemapOverrides(parseSitesCsv(readFileText(config.siteSitemapsCsvPath)), { knownSiteIds })
+    : new Map();
+  return { limitOverrides, sitemapOverrides };
 }
 
 /**

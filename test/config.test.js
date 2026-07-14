@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { loadLocalConfig, parseSitesCsv } from '../src/config.js';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { loadLocalConfig, parseSitesCsv, loadSiteOverrides } from '../src/config.js';
 
 test('loadLocalConfig: 默认路径都在项目内，且可以被 overrides 覆盖', () => {
   const defaults = loadLocalConfig();
@@ -57,4 +60,55 @@ test('parseSitesCsv: 忽略空行', () => {
 
   const records = parseSitesCsv(csv);
   assert.equal(records.length, 2);
+});
+
+function withTempDir(fn) {
+  const dir = mkdtempSync(join(tmpdir(), 'm5a-config-'));
+  try {
+    return fn(dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('loadSiteOverrides: 两份覆盖文件都不存在时返回空 Map，不报错', () => {
+  withTempDir((dir) => {
+    const config = loadLocalConfig({
+      siteLimitsCsvPath: join(dir, 'nope-limits.csv'),
+      siteSitemapsCsvPath: join(dir, 'nope-sitemaps.csv'),
+    });
+    const { limitOverrides, sitemapOverrides } = loadSiteOverrides(config);
+    assert.equal(limitOverrides.size, 0);
+    assert.equal(sitemapOverrides.size, 0);
+  });
+});
+
+test('loadSiteOverrides: 文件存在时正确解析真实内容', () => {
+  withTempDir((dir) => {
+    const limitsPath = join(dir, 'site-limits.csv');
+    const sitemapsPath = join(dir, 'site-sitemaps.csv');
+    writeFileSync(
+      limitsPath,
+      'site_id,max_download_bytes,max_decompressed_bytes,max_page_urls,max_sitemap_endpoints,max_depth,request_timeout_ms\nkongregate,52428800,,,,,\n',
+      'utf-8',
+    );
+    writeFileSync(
+      sitemapsPath,
+      'site_id,sitemap_url,enabled,mode,notes,verified_at\nlagged,https://lagged.com/sitemap.xml,true,manual_only,test,2026-07-14\n',
+      'utf-8',
+    );
+    const config = loadLocalConfig({ siteLimitsCsvPath: limitsPath, siteSitemapsCsvPath: sitemapsPath });
+    const { limitOverrides, sitemapOverrides } = loadSiteOverrides(config);
+    assert.equal(limitOverrides.get('kongregate').MAX_DOWNLOAD_BYTES, 52428800);
+    assert.deepEqual(sitemapOverrides.get('lagged'), { mode: 'manual_only', urls: ['https://lagged.com/sitemap.xml'] });
+  });
+});
+
+test('loadSiteOverrides: 文件存在但内容非法时明确抛错，不静默使用危险值', () => {
+  withTempDir((dir) => {
+    const limitsPath = join(dir, 'site-limits.csv');
+    writeFileSync(limitsPath, 'site_id,max_download_bytes\nx,not-a-number\n', 'utf-8');
+    const config = loadLocalConfig({ siteLimitsCsvPath: limitsPath, siteSitemapsCsvPath: join(dir, 'nope.csv') });
+    assert.throws(() => loadSiteOverrides(config), /不是合法正整数/);
+  });
 });

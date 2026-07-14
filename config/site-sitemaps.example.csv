@@ -1,0 +1,2 @@
+site_id,sitemap_url,enabled,mode,notes,verified_at
+lagged,https://lagged.com/sitemap.xml,true,manual_only,示例行：robots.txt声明的地址被拦截，改用已验证的公开Sitemap,2026-07-14

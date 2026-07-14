@@ -95,6 +95,7 @@ export async function fetchSitemap(url, options = {}) {
           contentEncoding,
           compressed: false,
           text: raw.toString('utf-8'),
+          downloadedBytes: raw.length,
         });
       }
 
@@ -109,6 +110,7 @@ export async function fetchSitemap(url, options = {}) {
           contentEncoding,
           compressed: true,
           text: decompressed.toString('utf-8'),
+          downloadedBytes: raw.length,
         });
       } catch (err) {
         return buildResult({
@@ -239,6 +241,7 @@ function buildResult({
   text = null,
   errorCode = null,
   errorMessage = null,
+  downloadedBytes = null,
 }) {
-  return { ok, httpStatus, contentType, contentEncoding, compressed, text, errorCode, errorMessage, attempts, finalUrl };
+  return { ok, httpStatus, contentType, contentEncoding, compressed, text, errorCode, errorMessage, attempts, finalUrl, downloadedBytes };
 }

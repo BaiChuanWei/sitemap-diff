@@ -2,7 +2,7 @@
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { loadLocalConfig, parseSitesCsv } from '../src/config.js';
+import { loadLocalConfig, parseSitesCsv, loadSiteOverrides } from '../src/config.js';
 import { openDb, syncSites } from '../src/db/index.js';
 import { collectSite } from '../src/sitemap/collector.js';
 import { runCollect } from '../src/collect-runner.js';
@@ -10,6 +10,8 @@ import { getDbStatus } from '../src/storage/index.js';
 import { acquireLock, releaseLock } from '../src/lock.js';
 import { classifyRun } from '../src/classify/runner.js';
 import { generateReport } from '../src/report/report.js';
+import { resolveSiteLimits, resolveSiteSitemaps } from '../src/site-overrides.js';
+import { diagnoseSite } from '../src/diagnose.js';
 
 /**
  * 本地入口。
@@ -26,10 +28,14 @@ import { generateReport } from '../src/report/report.js';
  * Milestone 2（只做采集检查，不写正式 URL 历史）：
  *   --inspect-site <id>
  *   --inspect-url <url>
+ *
+ * Milestone 5A-P1（只读诊断，绝不写数据库）：
+ *   --diagnose-site <id>
  */
 async function main() {
   const args = parseArgs(process.argv.slice(2));
 
+  if (args.diagnoseSite) return runDiagnoseSite(args.diagnoseSite);
   if (args.inspectSite) return runInspectSite(args.inspectSite);
   if (args.inspectUrl) return runInspectUrl(args.inspectUrl);
   if (args.dbStatus) return runDbStatus();
@@ -47,6 +53,7 @@ function parseArgs(argv) {
     const a = argv[i];
     if (a === '--inspect-site') args.inspectSite = argv[++i];
     else if (a === '--inspect-url') args.inspectUrl = argv[++i];
+    else if (a === '--diagnose-site') args.diagnoseSite = argv[++i];
     else if (a === '--collect') args.collect = true;
     else if (a === '--site') args.site = argv[++i];
     else if (a === '--db-status') args.dbStatus = true;
@@ -88,6 +95,7 @@ function runBaseline() {
     console.log('  --report-run <run_id> / --report-latest   生成本地报告（幂等）');
     console.log('  --db-status               查看数据库状态');
     console.log('  --inspect-site <id> / --inspect-url <url>   只做采集检查，不写正式历史（Milestone 2）');
+    console.log('  --diagnose-site <id>      只读诊断，不写任何数据库表（Milestone 5A-P1）');
   } finally {
     db.close();
   }
@@ -97,6 +105,9 @@ async function runCollectCommand(siteFilter, { classify = false, report = false 
   const config = loadLocalConfig();
   const records = loadRecords(config);
   if (!records) return;
+
+  const knownSiteIds = new Set(records.map((r) => r.site_id));
+  const { limitOverrides, sitemapOverrides } = loadSiteOverrides(config, { knownSiteIds });
 
   const db = openDb(config.dbPath);
   const runId = randomUUID();
@@ -126,7 +137,7 @@ async function runCollectCommand(siteFilter, { classify = false, report = false 
     }
 
     console.log(`开始采集 ${sites.length} 个站点（runId=${runId}）...`);
-    const result = await runCollect(db, { sites, runId, collectSiteFn: collectSite });
+    const result = await runCollect(db, { sites, runId, collectSiteFn: collectSite, siteLimitOverrides: limitOverrides, siteSitemapOverrides: sitemapOverrides });
 
     const s = result.stats;
     console.log('');
@@ -241,17 +252,65 @@ async function runInspectSite(siteId) {
     return;
   }
 
+  const knownSiteIds = new Set(records.map((r) => r.site_id));
+  const { limitOverrides, sitemapOverrides } = loadSiteOverrides(config, { knownSiteIds });
+  const limits = resolveSiteLimits(site.site_id, limitOverrides);
+  const { mode, urls } = resolveSiteSitemaps(site.site_id, sitemapOverrides);
+
   const baseUrl = site.domain ? `https://${site.domain}` : undefined;
   const result = await collectSite({
     siteId: site.site_id,
     domain: site.domain || null,
     baseUrl,
     manualSitemapUrl: site.sitemap_url || undefined,
+    manualSitemaps: urls.length ? urls : undefined,
+    discoveryMode: mode,
+    limits,
   });
 
   printSummary(result, site.site_id);
   writeDebugFile(config, result, site.site_id);
   process.exitCode = result.status === 'failed' ? 1 : 0;
+}
+
+async function runDiagnoseSite(siteId) {
+  const config = loadLocalConfig();
+  const records = loadRecords(config);
+  if (!records) return;
+
+  const site = records.find((r) => r.site_id === siteId);
+  if (!site) {
+    console.error(`站点清单里找不到 site_id=${siteId}（清单来源: ${config.sitesCsvPath}）`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const knownSiteIds = new Set(records.map((r) => r.site_id));
+  const { limitOverrides, sitemapOverrides } = loadSiteOverrides(config, { knownSiteIds });
+
+  const diag = await diagnoseSite({ site, limitOverrides, sitemapOverrides });
+
+  console.log(`诊断: ${site.site_id}（${site.domain || '(无 domain)'}）`);
+  console.log('（--diagnose-site 只读，不写 baseline / seen_urls / added_urls / url_classifications）');
+  console.log('');
+  console.log('站点配置:', JSON.stringify(diag.site, null, 2));
+  console.log('最终生效限制:', JSON.stringify(diag.effectiveLimits, null, 2));
+  console.log(`discovery mode: ${diag.discoveryMode}`);
+  console.log(`手工 Endpoint: ${diag.manualEndpoints.length ? diag.manualEndpoints.join(', ') : '(无)'}`);
+  console.log('首页状态:', JSON.stringify(diag.homepage));
+  console.log('robots.txt:', JSON.stringify(diag.robots));
+  console.log('常见路径验证:');
+  for (const p of diag.commonPathProbes) {
+    console.log(`  ${p.url} -> HTTP ${p.httpStatus ?? '(无响应)'} validXml=${p.validXml} xmlRootType=${p.xmlRootType ?? '-'}`);
+  }
+  console.log('主要 Endpoint:', JSON.stringify(diag.primaryEndpoint, null, 2));
+  console.log(`Endpoint 数量: ${diag.endpointCount}`);
+  console.log(`页面 URL 数量: ${diag.pageUrlCount}`);
+  console.log(`状态: ${diag.status} / complete=${diag.complete} / truncated=${diag.truncated}${diag.truncationReasons.length ? ` [${diag.truncationReasons.join(', ')}]` : ''}`);
+  console.log(`是否触及限制: ${diag.hitLimits}`);
+  console.log(`错误: ${diag.errorCode ? `[${diag.errorCode}] ${diag.errorMessage}` : '(无)'}`);
+  console.log(`推荐处理类型: ${diag.recommendedAction}`);
+  process.exitCode = 0;
 }
 
 async function runInspectUrl(url) {

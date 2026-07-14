@@ -125,3 +125,61 @@ test('robots.txt 有结果时不会再做常见路径探测', async () => {
     await close();
   }
 });
+
+test('mode=manual_only：完全跳过 robots.txt 声明和常见路径探测，只用手工 Endpoint', async () => {
+  const { url, close } = await startTestServer(
+    createRouter({
+      '/robots.txt': () => ({ body: 'Sitemap: https://example-games.test/from-robots.xml' }),
+      '/sitemap.xml': () => ({ body: urlsetXml([`${url}/g/a`]) }),
+    }),
+  );
+  try {
+    const result = await discoverSitemaps({
+      baseUrl: url,
+      manualSitemaps: ['https://example-games.test/manual-a.xml', 'https://example-games.test/manual-b.xml'],
+      mode: 'manual_only',
+      limits: fastLimits(),
+    });
+    const urls = result.sitemaps.map((s) => s.url);
+    assert.deepEqual(urls, ['https://example-games.test/manual-a.xml', 'https://example-games.test/manual-b.xml']);
+    assert.ok(result.sitemaps.every((s) => s.source === 'manual-config'));
+  } finally {
+    await close();
+  }
+});
+
+test('mode=manual_only：即使没有任何手工 Endpoint 也绝不回退到 robots/常见路径', async () => {
+  const { url, close } = await startTestServer(
+    createRouter({
+      '/robots.txt': () => ({ body: 'Sitemap: https://example-games.test/from-robots.xml' }),
+    }),
+  );
+  try {
+    const result = await discoverSitemaps({ baseUrl: url, mode: 'manual_only', limits: fastLimits() });
+    assert.equal(result.sitemaps.length, 0, 'manual_only 下手工列表为空时不能偷偷退回自动发现');
+  } finally {
+    await close();
+  }
+});
+
+test('mode=merge：手工 Endpoint 与 robots 声明合并去重', async () => {
+  const { url, close } = await startTestServer(
+    createRouter({
+      '/robots.txt': () => ({ body: 'Sitemap: https://example-games.test/from-robots.xml' }),
+    }),
+  );
+  try {
+    const result = await discoverSitemaps({
+      baseUrl: url,
+      manualSitemaps: ['https://example-games.test/manual-only.xml', 'https://example-games.test/from-robots.xml'],
+      mode: 'merge',
+      limits: fastLimits(),
+    });
+    const urls = result.sitemaps.map((s) => s.url).sort();
+    assert.deepEqual(urls, ['https://example-games.test/from-robots.xml', 'https://example-games.test/manual-only.xml']);
+    const dup = result.sitemaps.filter((s) => s.url === 'https://example-games.test/from-robots.xml');
+    assert.equal(dup.length, 1, '同一个 URL 被手工配置和 robots 同时声明时应该只出现一次');
+  } finally {
+    await close();
+  }
+});
