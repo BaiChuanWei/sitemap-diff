@@ -2,6 +2,7 @@
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 import { loadLocalConfig, parseSitesCsv, loadSiteOverrides } from '../src/config.js';
 import { openDb, syncSites } from '../src/db/index.js';
 import { collectSite } from '../src/sitemap/collector.js';
@@ -380,7 +381,15 @@ function safeLabel(url) {
 
 // 只有直接以 CLI 方式运行（node bin/run.js ...）才执行 main()；被测试 import 时不触发，
 // 避免测试悄悄跑到真实的 data/local.db 上。
-const isMainModule = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
+//
+// 不能用 `file://${process.argv[1]}` 手拼 URL 字符串跟 import.meta.url
+// 比较——Windows 上 process.argv[1] 是反斜杠路径，import.meta.url 却是
+// 正斜杠 file:// URL，两种格式永远不相等，导致 isMainModule 恒为
+// false、main() 永远不会被调用（进程立刻正常退出，不留任何错误堆栈或
+// 日志）。这是 bin/dashboard.js 在真实 Windows 环境验收时发现的同一个
+// 问题，此处是同一个 bug、同一个修复。pathToFileURL() 是 Node 内置的
+// 跨平台路径→file URL 转换，不需要手工处理分隔符差异。
+const isMainModule = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMainModule) {
   main();
 }

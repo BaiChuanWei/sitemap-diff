@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from 'node:url';
 import { loadLocalConfig } from '../src/config.js';
 import { createDashboardServer, SERVICE_NAME } from '../src/dashboard/server.js';
 
@@ -71,9 +72,23 @@ export async function probeExisting(port) {
   }
 }
 
-// 只有直接以 CLI 方式运行才启动服务；被测试 import 时不会触发 main()，
-// 与 bin/run.js 的既有约定保持一致。
-const isMainModule = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
-if (isMainModule) {
+/**
+ * 判断当前模块是不是被直接以 CLI 方式运行（而不是被测试 import）。
+ *
+ * 不能用 `file://${argv1}` 手拼 URL 字符串跟 metaUrl 比较——Windows 上
+ * process.argv[1] 是反斜杠路径（如 D:\sitemap监控\bin\dashboard.js），
+ * import.meta.url 却是正斜杠 file:// URL（如
+ * file:///D:/sitemap监控/bin/dashboard.js），两种格式永远不相等，导致
+ * isMainModule 恒为 false、main() 永远不会被调用——进程会立刻正常退出，
+ * 不留任何错误堆栈或日志，非常难排查。pathToFileURL() 是 Node 内置的
+ * 跨平台路径→file URL 转换，不需要手工处理分隔符差异，且在真实 Windows
+ * 环境验证过能正确工作（本函数的 toFileUrl 参数只是为了让这条判断逻辑
+ * 本身可以在任意平台上被单元测试覆盖，不代表运行时会用别的实现）。
+ */
+export function computeIsMainModule(argv1, metaUrl, toFileUrl = pathToFileURL) {
+  return Boolean(argv1) && metaUrl === toFileUrl(argv1).href;
+}
+
+if (computeIsMainModule(process.argv[1], import.meta.url)) {
   main();
 }
