@@ -1,7 +1,8 @@
 ﻿# create-desktop-shortcuts.ps1
-# 用途：在当前 Windows 用户的桌面创建两个快捷方式：
+# 用途：在当前 Windows 用户的桌面创建三个快捷方式：
 #   "Sitemap监控面板"   -> start-dashboard.ps1（只打开面板，不开始采集）
 #   "运行Sitemap监控"   -> run-and-open-dashboard.ps1（启动/复用服务并打开面板）
+#   "查看最新结果"       -> open-latest-report.ps1（打开最新一次报告所在目录）
 #
 # 重要：本脚本只能在真实 Windows + PowerShell 环境下创建和验证快捷方式。
 # 在非 Windows 沙盒环境中执行会因为缺少 WScript.Shell COM 组件而失败，
@@ -45,6 +46,7 @@ function New-DashboardShortcut {
 
 New-DashboardShortcut -Name 'Sitemap监控面板' -TargetScript (Join-Path $PSScriptRoot 'start-dashboard.ps1')
 New-DashboardShortcut -Name '运行Sitemap监控' -TargetScript (Join-Path $PSScriptRoot 'run-and-open-dashboard.ps1')
+New-DashboardShortcut -Name '查看最新结果' -TargetScript (Join-Path $PSScriptRoot 'open-latest-report.ps1')
 
 Write-Host ''
 Write-Host '桌面快捷方式创建完成。' -ForegroundColor Green

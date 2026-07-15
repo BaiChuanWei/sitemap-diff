@@ -48,6 +48,10 @@ output/
 # 面板配置写入前的自动备份（运行时生成，不提交）
 /config/backups/
 
+# scripts/backup-local-data.ps1 / restore-local-data.ps1 生成的本地数据备份
+# （运行时生成，不提交——每台机器自己的备份留在自己本地即可）
+/backups/
+
 # Cloudflare Workers (legacy)
 .wrangler/
 dist/
