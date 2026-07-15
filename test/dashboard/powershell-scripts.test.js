@@ -208,6 +208,23 @@ test('restore-local-data.ps1：失败回滚时，本次新建的文件会被删�
   assert.match(content, /finally \{[\s\S]*rollbackTmpPath[\s\S]*Remove-Item/, '回滚临时文件必须在 finally 里保证被清理');
 });
 
+test('restore-local-data.ps1：File.Replace 第三个参数不再是 $null（真实 Windows PowerShell 5.1 会抛"路径的形式不合法"），改用同目录下的真实备份路径且成功/失败都会清理', () => {
+  const content = readFileSync(join(scriptsDir, 'restore-local-data.ps1'), 'utf-8');
+  // 不能再出现 Replace(..., $null) 这种调用形式。
+  assert.doesNotMatch(content, /\[System\.IO\.File\]::Replace\([^)]*\$null\)/, 'File.Replace 的第三个参数不得再传 $null');
+  // 必须显式构造一个真实路径变量传给 Replace 的第三个参数。
+  assert.match(content, /\[System\.IO\.File\]::Replace\(\$Source, \$DestinationFull, \$ReplaceBackupPath\)/, '必须传入真实的备份路径变量，而不是字面量 $null');
+  // 备份路径必须是"目标文件的完整路径 + 后缀"拼出来的，天然位于目标文件同一目录。
+  assert.match(content, /\$ReplaceBackupPath = "\$DestinationFull\.replace-backup-/, '替换备份路径必须基于目标文件的完整路径拼接，确保和目标文件同目录');
+  assert.match(content, /\$DestinationFull = \[System\.IO\.Path\]::GetFullPath\(\$Destination\)/, '必须先转换成完整绝对路径，兼容调用方传入的相对路径写法');
+  // 成功和失败都必须清理这个临时备份文件——用 try/finally 包住 Replace 调用本身。
+  assert.match(
+    content,
+    /try \{\s*\[System\.IO\.File\]::Replace\(\$Source, \$DestinationFull, \$ReplaceBackupPath\)\s*\} finally \{[\s\S]*?ReplaceBackupPath[\s\S]*?Remove-Item/,
+    'Replace 调用必须被 try/finally 包住，确保 replace-backup 临时文件无论成功失败都会被清理',
+  );
+});
+
 test('restore-local-data.ps1：数据库完整性检查是恢复失败的强制门槛，不能被跳过', () => {
   const content = readFileSync(join(scriptsDir, 'restore-local-data.ps1'), 'utf-8');
   // 找不到 Node：必须直接判定失败并触发回滚，不能只打印警告然后继续宣布恢复成功。

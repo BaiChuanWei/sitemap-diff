@@ -45,10 +45,24 @@ function Assert-WithinProject {
 # 同一文件系统内的"复制到临时文件 + 原子替换"：
 #   目标已存在 -> [System.IO.File]::Replace（Windows ReplaceFile API，PS 5.1/7 都支持）；
 #   目标不存在 -> 直接 Move，不存在"覆盖谁"的问题，天然没有中间态。
+#
+# 真实 Windows PowerShell 5.1 环境验收发现：Replace 的第三个参数
+# （destinationBackupFileName）传 $null 会抛"路径的形式不合法"异常——
+# 必须传一个真实、完整的绝对路径，Replace 会把"被替换掉的旧目标文件"
+# 移到这个路径下，用完立刻删除（本脚本已经有自己的"恢复前自动备份"，
+# 不需要保留 Replace 自带的这份临时备份）。
 function Move-FileAtomic {
     param([string]$Source, [string]$Destination)
     if (Test-Path $Destination) {
-        [System.IO.File]::Replace($Source, $Destination, $null)
+        $DestinationFull = [System.IO.Path]::GetFullPath($Destination)
+        $ReplaceBackupPath = "$DestinationFull.replace-backup-$([guid]::NewGuid().ToString('N'))"
+        try {
+            [System.IO.File]::Replace($Source, $DestinationFull, $ReplaceBackupPath)
+        } finally {
+            if (Test-Path $ReplaceBackupPath) {
+                Remove-Item -Path $ReplaceBackupPath -Force -ErrorAction SilentlyContinue
+            }
+        }
     } else {
         [System.IO.File]::Move($Source, $Destination)
     }
