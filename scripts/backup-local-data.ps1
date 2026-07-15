@@ -6,6 +6,11 @@
 # 备份 node_modules、.git、output（报告可以随时重新生成，不算需要保护的
 # 原始数据）或任何临时文件。
 #
+# 面板运行时拒绝备份：直接 Copy-Item 复制正被面板进程打开的 SQLite 文件
+# （WAL 模式）可能拿到一份不一致的快照。本脚本不自动停止服务、不实现
+# 在线 SQLite 备份、不提供绕过检查的 Force 参数——发现面板在跑就直接
+# 拒绝，明确提示用户自己先执行 stop-dashboard.ps1。
+#
 # 支持中文路径：使用 $PSScriptRoot 定位项目根目录。
 #
 # 输出：脚本最后一行把生成的备份目录完整路径写到标准输出（Write-Output），
@@ -15,6 +20,24 @@
 $ErrorActionPreference = 'Stop'
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
+
+# ---- 0. 面板服务运行中拒绝备份 ----
+$Port = 8766
+if ($env:SITEMAP_DASHBOARD_PORT) { $Port = [int]$env:SITEMAP_DASHBOARD_PORT }
+try {
+    $health = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/api/health" -UseBasicParsing -TimeoutSec 2 -Headers @{ Host = "127.0.0.1:$Port" }
+    $envelope = $health.Content | ConvertFrom-Json
+    if ($envelope.data -and $envelope.data.service -eq 'sitemap-dashboard') {
+        Write-Host "错误：Sitemap 监控面板服务正在运行（端口 $Port，pid=$($envelope.data.pid)）。" -ForegroundColor Red
+        Write-Host "直接复制正在被面板进程打开的数据库文件可能得到不一致的快照，拒绝备份。" -ForegroundColor Red
+        Write-Host "请先执行以下命令停止面板服务，再重新运行备份：" -ForegroundColor Red
+        Write-Host "  .\scripts\stop-dashboard.ps1" -ForegroundColor Red
+        exit 1
+    }
+} catch {
+    # 连接被拒绝/超时：视为服务未运行，正常继续。
+}
+
 $Timestamp = Get-Date -Format 'yyyy-MM-dd_HHmmss'
 $BackupDir = Join-Path (Join-Path $ProjectRoot 'backups') $Timestamp
 

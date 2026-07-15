@@ -84,22 +84,23 @@ ZIP 内 12 个文件：`manifest.json`（元数据）、`ai-review.json`（结�
 
 ## 8. 备份与恢复
 
-**手动备份**（数据库 + 三份配置 CSV + 可选审计日志）：
+**备份和恢复之前都必须先停止面板服务**——面板运行时数据库文件正被进程打开（WAL 模式），直接复制可能拿到不一致的快照。`backup-local-data.ps1` 会自己检测端口 8766 是否在跑本项目的服务，检测到就直接拒绝备份并提示先停止，**不会自动帮你停止**：
 
 ```powershell
+.\scripts\stop-dashboard.ps1
 .\scripts\backup-local-data.ps1
 ```
 
-会在 `backups\YYYY-MM-DD_HHmmss\` 下生成一份备份和 `backup-manifest.json`。
+会在 `backups\YYYY-MM-DD_HHmmss\` 下生成一份备份（数据库 + 三份配置 CSV + 可选审计日志）和 `backup-manifest.json`。
 
-**恢复**（必须显式指定备份目录；恢复前请先停止面板服务）：
+**恢复**（必须显式指定备份目录；同样必须先停止面板服务）：
 
 ```powershell
 .\scripts\stop-dashboard.ps1
 .\scripts\restore-local-data.ps1 -BackupDir "backups\2026-07-15_143022"
 ```
 
-恢复脚本会先自动备份当前数据（万一恢复错了还能退回来），逐个文件用"临时文件 + 原子替换"的方式恢复，恢复后对数据库做完整性检查，任何一步失败都会整体回滚，不会留下半份数据库或配置。
+恢复脚本会先自动备份当前数据（万一恢复错了还能退回来），逐个文件用"临时文件 + 原子替换"的方式恢复。**只要这次恢复包含数据库文件，恢复后的 SQLite 完整性检查（`PRAGMA integrity_check`）就是强制步骤，不能跳过**——找不到 Node.js、`better-sqlite3` 加载失败、检查命令本身执行失败、或者检查结果不是 `ok`，都会被当成恢复失败处理。任何一步失败都会整体回滚：原本就存在的文件换回旧内容，这次恢复新建出来的文件会被删除，不会留下半份数据库或配置，也不会留下临时文件。
 
 ## 9. 遇到问题
 

@@ -86,14 +86,35 @@ git pull
 
 如果 `stop-dashboard.ps1` 提示"没有检测到运行中的面板服务"，但任务管理器里还能看到 `node.exe` 进程占着 8766 端口——先用 `.\scripts\check-installation.ps1` 确认端口状态，再用任务管理器手工核对该进程的命令行（确认是不是本项目的 `bin\dashboard.js`）后再决定是否手工结束它；本项目的脚本不会替你杀死一个它自己不能确认身份的进程。
 
-## 6. partial / failed 是什么意思
+## 6. 备份/恢复被拒绝，或恢复失败
+
+**现象 A**：运行 `backup-local-data.ps1` 报错"Sitemap 监控面板服务正在运行……拒绝备份"。
+
+**原因**：**备份和恢复之前都必须先停止面板服务**。面板运行时数据库文件正被进程以 WAL 模式打开，直接用 `Copy-Item` 复制可能拿到一份不一致的快照——脚本发现面板在跑就直接拒绝，不会替你自动停止服务，也没有绕过这个检查的参数。
+
+**修复**：
+
+```powershell
+.\scripts\stop-dashboard.ps1
+.\scripts\backup-local-data.ps1
+```
+
+`restore-local-data.ps1` 同样要求面板服务未运行，报错时用同样的方法先停止服务再重试。
+
+**现象 B**：运行 `restore-local-data.ps1` 报错"恢复后的数据库完整性检查未通过或无法执行"，恢复被回滚。
+
+**原因**：只要这次恢复包含 `data\local.db`，恢复后跑一次 `PRAGMA integrity_check` 是**强制步骤，不能跳过**——找不到 Node.js、`better-sqlite3` 加载失败（常见于 NODE_MODULE_VERSION 不匹配，见第 2 节）、检查命令本身执行失败、或者检查结果不是 `ok`，都会被当成恢复失败，整体回滚到恢复前的状态（原本存在的文件换回旧内容，这次新建的文件会被删除）。
+
+**修复**：先用 `.\scripts\check-installation.ps1` 排查 Node/ABI/better-sqlite3 是否正常（见第 2、3 节），确认环境没问题后再重新执行恢复。如果确认恢复源本身的 `data\local.db` 已经损坏，改用更早一份备份重试。
+
+## 7. partial / failed 是什么意思
 
 * **partial**：技术上有响应，但结果不完整或不可靠（比如 Sitemap 被截断、部分子 Sitemap 抓取失败、或者页面数是 0）。这次结果**不会**更新"新增/缺失/恢复"的比较基准，也不会污染历史数据。
 * **failed**：这次采集完全没跑成功（网络错误、超时、目标站点整体不可达等）。同样不会更新历史。
 
 两者的共同点：**只影响这一次运行的展示，不会覆盖或清空之前成功建立的历史**。对应站点这一轮的"缺失/连续两轮缺失/恢复"列会显示"未对比"，不是这次真的算出来的 0。
 
-## 7. 怎么验证 AI 审查包 ZIP 本身没坏
+## 8. 怎么验证 AI 审查包 ZIP 本身没坏
 
 ```powershell
 Expand-Archive -Path "output\2026-07-15\<run_id>\ai-review-package.zip" -DestinationPath "$env:TEMP\ai-review-check" -Force

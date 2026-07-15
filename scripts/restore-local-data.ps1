@@ -123,7 +123,11 @@ Write-Host "恢复前自动备份完成：$PreRestoreBackupDir"
 Write-Host ""
 
 # ---- 6. 逐个文件恢复：复制到临时文件 + 原子替换；任一步失败立即停止，转入回滚 ----
+# $RestoredFileExistedBefore 记录每个文件在"这次恢复动作之前"是否已经存在——
+# 回滚时需要区分两种情况：原本就有的文件要换回旧内容；这次恢复凭空新建
+# 出来的文件（备份里有、但项目里之前没有）必须直接删除，不能留下。
 $RestoredFiles = @()
+$RestoredFileExistedBefore = @{}
 $RollbackNeeded = $false
 $FailureMessage = $null
 
@@ -134,6 +138,7 @@ foreach ($rel in $AvailableInBackup) {
     try {
         Assert-WithinProject -FullPath $destPath
 
+        $existedBefore = Test-Path $destPath
         $destDir = Split-Path -Parent $destPath
         if (-not (Test-Path $destDir)) {
             New-Item -ItemType Directory -Path $destDir -Force | Out-Null
@@ -142,7 +147,9 @@ foreach ($rel in $AvailableInBackup) {
         $tmpPath = "$destPath.tmp-$([guid]::NewGuid().ToString('N'))"
         Copy-Item -Path $srcPath -Destination $tmpPath -Force
         Move-FileAtomic -Source $tmpPath -Destination $destPath
+        $tmpPath = $null
         $RestoredFiles += $rel
+        $RestoredFileExistedBefore[$rel] = $existedBefore
         Write-Host "已恢复：$rel" -ForegroundColor Green
     } catch {
         $RollbackNeeded = $true
@@ -152,26 +159,35 @@ foreach ($rel in $AvailableInBackup) {
     }
 }
 
-# ---- 7. 恢复后对数据库做完整性检查；不通过也视为失败，触发回滚 ----
+# ---- 7. 恢复后对数据库做完整性检查 ----
+# 只要这次恢复动作涉及 data\local.db，完整性检查就是强制步骤：Node 不
+# 存在、better-sqlite3 加载失败、node 命令本身执行失败、或者
+# PRAGMA integrity_check 结果不是 'ok'，一律视为恢复失败并触发整体回滚
+# ——不允许"跳过检查后仍然宣布恢复成功"。
 if (-not $RollbackNeeded -and ($RestoredFiles -contains 'data\local.db')) {
     $RestoredDbPath = Join-Path $ProjectRoot 'data\local.db'
     $NodeCmd = Get-Command node -ErrorAction SilentlyContinue
-    if ($NodeCmd) {
-        $integrityScript = "const Database = require('better-sqlite3'); const db = new Database(process.argv[1], { readonly: true, fileMustExist: true }); const result = db.pragma('integrity_check', { simple: true }); process.stdout.write(String(result)); db.close();"
+    if (-not $NodeCmd) {
+        $RollbackNeeded = $true
+        $FailureMessage = '恢复包含 data\local.db，但找不到 Node.js，无法执行强制的数据库完整性检查（PRAGMA integrity_check），恢复视为失败。'
+    } else {
+        # require('better-sqlite3') 失败（比如 ABI 不匹配）在 JS 里被捕获并
+        # 显式置 exitCode=1，和"命令本身执行失败"用同一套判断逻辑处理，
+        # 不需要在 PowerShell 里区分错误类型。
+        $integrityScript = "try { const Database = require('better-sqlite3'); const db = new Database(process.argv[1], { readonly: true, fileMustExist: true }); const result = db.pragma('integrity_check', { simple: true }); process.stdout.write(String(result)); db.close(); } catch (e) { process.stdout.write('CHECK_FAILED:' + e.message); process.exitCode = 1; }"
         Push-Location $ProjectRoot
         try {
             $integrityResult = & node -e $integrityScript -- $RestoredDbPath 2>&1
+            $integrityExitCode = $LASTEXITCODE
         } finally {
             Pop-Location
         }
-        if ($integrityResult -ne 'ok') {
+        if ($integrityExitCode -ne 0 -or $integrityResult -ne 'ok') {
             $RollbackNeeded = $true
-            $FailureMessage = "恢复后的数据库未通过完整性检查：$integrityResult"
+            $FailureMessage = "恢复后的数据库完整性检查未通过或无法执行：$integrityResult"
         } else {
             Write-Host "恢复后的数据库完整性检查（PRAGMA integrity_check）通过。" -ForegroundColor Green
         }
-    } else {
-        Write-Host "警告：未找到 Node.js，跳过恢复后的数据库完整性检查。" -ForegroundColor Yellow
     }
 }
 
@@ -181,12 +197,32 @@ if ($RollbackNeeded) {
     Write-Host "错误：$FailureMessage" -ForegroundColor Red
     Write-Host "正在从恢复前自动备份回滚..." -ForegroundColor Yellow
     foreach ($rel in $RestoredFiles) {
-        $rollbackSrc = Join-Path $PreRestoreBackupDir $rel
         $rollbackDest = Join-Path $ProjectRoot $rel
-        if (Test-Path $rollbackSrc) {
-            $tmpPath = "$rollbackDest.tmp-$([guid]::NewGuid().ToString('N'))"
-            Copy-Item -Path $rollbackSrc -Destination $tmpPath -Force
-            Move-FileAtomic -Source $tmpPath -Destination $rollbackDest
+        $rollbackTmpPath = $null
+        try {
+            if ($RestoredFileExistedBefore[$rel]) {
+                # 原本就存在：从"恢复前自动备份"换回旧内容。
+                $rollbackSrc = Join-Path $PreRestoreBackupDir $rel
+                if (Test-Path $rollbackSrc) {
+                    $rollbackTmpPath = "$rollbackDest.tmp-$([guid]::NewGuid().ToString('N'))"
+                    Copy-Item -Path $rollbackSrc -Destination $rollbackTmpPath -Force
+                    Move-FileAtomic -Source $rollbackTmpPath -Destination $rollbackDest
+                    $rollbackTmpPath = $null
+                    Write-Host "已回滚：$rel（恢复为原有内容）" -ForegroundColor Yellow
+                } else {
+                    Write-Host "警告：$rel 在恢复前自动备份里也找不到，无法回滚这个文件的原有内容。" -ForegroundColor Red
+                }
+            } else {
+                # 原本不存在：这次恢复动作新建出来的文件，回滚时必须删除，不能留下。
+                if (Test-Path $rollbackDest) {
+                    Remove-Item -Path $rollbackDest -Force
+                    Write-Host "已回滚：$rel（删除本次新建的文件）" -ForegroundColor Yellow
+                }
+            }
+        } catch {
+            Write-Host "警告：回滚 $rel 时出错：$($_.Exception.Message)" -ForegroundColor Red
+        } finally {
+            if ($rollbackTmpPath -and (Test-Path $rollbackTmpPath)) { Remove-Item -Path $rollbackTmpPath -Force -ErrorAction SilentlyContinue }
         }
     }
     Write-Host "已回滚到恢复前的状态。恢复前的自动备份仍保留在：$PreRestoreBackupDir" -ForegroundColor Yellow

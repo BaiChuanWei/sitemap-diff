@@ -176,6 +176,51 @@ test('backup-local-data.ps1：备份文件白名单正确，默认不包含 node
   assert.match(content, /includedFiles/);
 });
 
+// ---- 安全补正（对 7e7584f 的最小修正）----
+
+test('backup-local-data.ps1：面板运行中拒绝备份，不自动停止服务，不提供绕过参数', () => {
+  const content = readFileSync(join(scriptsDir, 'backup-local-data.ps1'), 'utf-8');
+  assert.match(content, /api\/health/, '必须探测面板服务是否在运行');
+  assert.match(content, /sitemap-dashboard/, '必须确认探测到的服务确实是本项目的面板');
+  assert.match(content, /exit 1/, '检测到面板运行中必须拒绝并退出，不能继续备份');
+  assert.match(content, /stop-dashboard\.ps1/, '必须明确提示用户自己执行 stop-dashboard.ps1');
+  // 不得自动停止服务、不得提供绕过检查的 Force 参数。
+  assert.doesNotMatch(content, /Stop-Process/, '不得自动停止面板服务');
+  assert.doesNotMatch(content, /\[switch\]\$Force/, '不得提供绕过运行中检查的 Force 参数');
+  // 拒绝逻辑必须出现在真正开始复制文件（Copy-Item）之前，不能先备份完再事后判断。
+  // 用去掉注释行之后的文本比较位置——顶部说明注释里提到"Copy-Item"字样
+  // 不代表真的先执行了复制。
+  const codeOnly = stripCommentLines(content);
+  const healthCheckIndex = codeOnly.indexOf('api/health');
+  const firstCopyIndex = codeOnly.indexOf('Copy-Item');
+  assert.ok(healthCheckIndex >= 0 && firstCopyIndex >= 0 && healthCheckIndex < firstCopyIndex, '运行中检查必须在第一次 Copy-Item 之前执行');
+});
+
+test('restore-local-data.ps1：失败回滚时，本次新建的文件会被删除，原本存在的文件才换回旧内容', () => {
+  const content = readFileSync(join(scriptsDir, 'restore-local-data.ps1'), 'utf-8');
+  assert.match(content, /RestoredFileExistedBefore/, '必须记录每个文件恢复前是否已经存在');
+  assert.match(content, /Test-Path \$destPath/, '记录"是否已存在"必须发生在真正写入目标文件之前');
+  // 回滚分支必须同时覆盖"存在→换回旧内容"和"不存在→删除"两条路径。
+  assert.match(content, /if \(\$RestoredFileExistedBefore\[\$rel\]\)/, '回滚必须按记录的原始存在状态分支处理');
+  assert.match(content, /Remove-Item -Path \$rollbackDest -Force/, '原本不存在的文件必须在回滚时被删除');
+  // 回滚过程中产生的临时文件也必须清理（finally 块兜底）。
+  assert.match(content, /\$rollbackTmpPath/, '回滚写入也必须走临时文件');
+  assert.match(content, /finally \{[\s\S]*rollbackTmpPath[\s\S]*Remove-Item/, '回滚临时文件必须在 finally 里保证被清理');
+});
+
+test('restore-local-data.ps1：数据库完整性检查是恢复失败的强制门槛，不能被跳过', () => {
+  const content = readFileSync(join(scriptsDir, 'restore-local-data.ps1'), 'utf-8');
+  // 找不到 Node：必须直接判定失败并触发回滚，不能只打印警告然后继续宣布恢复成功。
+  const noNodeBranch = content.match(/if \(-not \$NodeCmd\) \{[\s\S]{0,300}/);
+  assert.ok(noNodeBranch, '必须显式处理"找不到 Node.js"分支');
+  assert.match(noNodeBranch[0], /RollbackNeeded = \$true/, '找不到 Node.js 必须触发回滚，不能只是警告后跳过检查');
+  assert.doesNotMatch(content, /跳过恢复后的数据库完整性检查/, '不允许存在"跳过完整性检查"的文案或路径');
+  // better-sqlite3 加载失败 / 命令执行失败，都必须和"结果不是 ok"共用同一套失败判断。
+  assert.match(content, /catch \(e\) \{ process\.stdout\.write\('CHECK_FAILED:' \+ e\.message\); process\.exitCode = 1; \}/, 'better-sqlite3 加载失败必须被捕获并显式置失败退出码');
+  assert.match(content, /\$integrityExitCode = \$LASTEXITCODE/, '必须检查 node 命令自身的退出码，不能只看标准输出内容');
+  assert.match(content, /integrityExitCode -ne 0 -or \$integrityResult -ne 'ok'/, '退出码非 0 或结果不是 ok，任一条件都必须判定为失败');
+});
+
 test('restore-local-data.ps1：恢复保护措施齐全（必须显式指定备份目录/恢复前自动备份/原子替换/完整性校验/路径穿越防护/失败回滚）', () => {
   const content = readFileSync(join(scriptsDir, 'restore-local-data.ps1'), 'utf-8');
   assert.match(content, /Parameter\(Mandatory = \$true\)/, '必须要求显式指定 -BackupDir，不能有默认值');
