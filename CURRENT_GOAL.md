@@ -29,19 +29,29 @@
 11. 输出 CSV、JSON 和 Markdown 报告；
 12. 单个站点失败不能影响其他站点；
 13. 失败不能清空或覆盖历史成功数据；
-14. 支持约 100 个站点稳定运行。
+14. 支持约 100 个站点稳定运行；
+15. 将本轮可靠结果与该站点上一次可靠 Sitemap 结果比较，判断每个已见 URL 是本轮缺失（missing）、连续两轮缺失（consecutive_missing）还是恢复（restored）——这三种状态均已实现（当前本地 v1 范围内），不代表页面被永久删除；
+16. 为每次运行生成本地 AI 审查包：结构化 JSON（manifest.json / ai-review.json）+ 纯文本任务说明（ai-review.txt）+ 全部报告文件打包的 zip（ai-review-package.zip）。AI 审查包只整理本地已有数据，供用户自行上传给外部 AI 工具使用，本工具自身不调用任何 AI API。
 
 ## 三、第一版最重要的产物
 
-每天或每次运行后生成：
+每天或每次运行后，在该次运行自己的报告目录生成：
 
 ```text
-output/YYYY-MM-DD/
+output/YYYY-MM-DD/<run_id>/
+├── manifest.json               AI 审查包元数据（运行信息 / 统计 / 文件清单 / 警告）
+├── ai-review.json              AI 审查包结构化数据（合并新增/缺失/连续两轮缺失/恢复四类条目）
+├── ai-review.txt               AI 审查包纯文本任务说明（可直接粘贴给 ChatGPT/Claude/Gemini）
+├── report.md
 ├── new-urls.csv
 ├── new-urls.json
 ├── new-games.csv
 ├── unknown-urls.csv
-└── report.md
+├── missing-urls.csv            本轮缺失
+├── consecutive-missing-urls.csv 连续两轮缺失
+├── restored-urls.csv           恢复
+├── changes.json
+└── ai-review-package.zip       以上 12 个文件打包，AI 审查包正式落盘位置（不含数据库/配置/日志）
 ```
 
 CSV 至少包含：
@@ -140,9 +150,9 @@ fixture
 * 搜索量分析；
 * SERP 分析；
 * 复杂趋势评分；
-* 完整 removed/restored 状态；
 * 复杂游戏实体人工合并系统；
-* changedetection.io 全面接入。
+* changedetection.io 全面接入；
+* OpenAI / Claude / Gemini 等 AI API 集成（AI 审查包只在本地整理、打包已有数据，供用户自行上传给外部 AI 工具，本工具自身不调用任何 AI API、不需要任何 API Key）。
 
 这些能力只能作为未来第二阶段规划，不能阻塞本地生产工具。
 

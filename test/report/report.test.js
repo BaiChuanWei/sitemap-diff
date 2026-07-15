@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 import { openDb } from '../../src/db/index.js';
 import { persistCompleteSiteResult, createCrawlRun, finishCrawlRun } from '../../src/storage/index.js';
 import { classifyRun } from '../../src/classify/runner.js';
@@ -182,42 +182,140 @@ test('report.md 含 run_id/时间/统计/输出路径', async () => {
   });
 });
 
-test('AI审查包：正式落盘在 run 目录，原子覆盖不留临时文件，只含报告文件、不含库/配置/日志', async () => {
+const AI_REVIEW_PACKAGE_FILES = [
+  'ai-review.json', 'ai-review.txt', 'changes.json', 'consecutive-missing-urls.csv',
+  'manifest.json', 'missing-urls.csv', 'new-games.csv', 'new-urls.csv', 'new-urls.json',
+  'report.md', 'restored-urls.csv', 'unknown-urls.csv',
+].sort();
+
+test('AI审查包：manifest.json / ai-review.json / ai-review.txt + 原有9个报告文件，12个文件正式落盘并原子打包', async () => {
   await withTempDb(async (db, outDir) => {
-    const runId = await setupRun(db, { addedUrls: ['https://poki.com/g/hero-quest'], fetchPagesFn: mixedFetch });
+    const siteId = 'poki';
+    db.prepare('INSERT INTO sites (site_id, domain, enabled, expected_game_path) VALUES (?, ?, 1, ?)').run(siteId, 'poki.com', '/g/');
+    const site = { site_id: siteId, domain: 'poki.com' };
+    const A = 'https://poki.com/g/a';
+    const B = 'https://poki.com/g/b';
+    const C = 'https://poki.com/g/c'; // 第4轮首次缺失（missing）
+    const D = 'https://poki.com/g/d'; // 第2/3轮缺失，第4轮恢复（restored）
+    const G = 'https://poki.com/g/g'; // 第3轮首次缺失，第4轮连续两轮缺失（consecutive_missing）
+    const F = 'https://poki.com/g/hero-quest'; // 第4轮才出现（added）
 
-    const first = generateReport(db, { runId, outputDir: outDir });
-    assert.ok(first.files.aiReviewPackageZip.endsWith('ai-review-package.zip'));
-    assert.ok(existsSync(first.files.aiReviewPackageZip), '正式 zip 必须落盘在 run 目录');
-    assert.equal(first.files.aiReviewPackageZip, join(first.dir, 'ai-review-package.zip'), 'zip 必须和其它报告文件同目录');
-    assert.equal(first.aiReviewPackageRelativePath, `output/${first.date}/${runId}/ai-review-package.zip`);
+    createCrawlRun(db, { runId: 'r1', startedAt: '2026-07-13T00:00:00Z' });
+    persistCompleteSiteResult(db, { runId: 'r1', site, result: completeResult(siteId, [A, B, C, D, G]) }); // baseline
 
-    const zipBuf1 = readFileSync(first.files.aiReviewPackageZip);
-    const entries1 = readZipEntries(zipBuf1);
-    const names = entries1.map((e) => e.name).sort();
-    assert.deepEqual(
-      names,
-      [
-        'changes.json', 'consecutive-missing-urls.csv', 'missing-urls.csv', 'new-games.csv',
-        'new-urls.csv', 'new-urls.json', 'report.md', 'restored-urls.csv', 'unknown-urls.csv',
-      ],
-      'zip 内必须只有报告文件，不能出现数据库/配置/日志文件',
-    );
+    createCrawlRun(db, { runId: 'r2', startedAt: '2026-07-13T01:00:00Z' });
+    persistCompleteSiteResult(db, { runId: 'r2', site, result: completeResult(siteId, [A, B, C, G]) }); // D missing
 
-    // 重复生成（幂等）：原子改名后不应该留下任何 .tmp 临时文件，且解包内容一致。
-    const second = generateReport(db, { runId, outputDir: outDir });
+    createCrawlRun(db, { runId: 'r3', startedAt: '2026-07-13T02:00:00Z' });
+    persistCompleteSiteResult(db, { runId: 'r3', site, result: completeResult(siteId, [A, B, C]) }); // D consecutive_missing；G missing
+
+    createCrawlRun(db, { runId: 'r4', startedAt: '2026-07-13T03:00:00Z' });
+    const persisted = persistCompleteSiteResult(db, { runId: 'r4', site, result: completeResult(siteId, [A, B, D, F]) }); // C missing；D restored；G consecutive_missing；F added
+    finishCrawlRun(db, {
+      runId: 'r4',
+      finishedAt: '2026-07-13T03:00:05Z',
+      status: 'success',
+      stats: {
+        sitesTotal: 1, sitesSuccess: 1, sitesPartial: 0, sitesFailed: 0,
+        baselineSiteCount: 0, baselineUrlCount: 0,
+        addedUrlCount: persisted.addedCount, missingUrlCount: persisted.missingCount,
+        consecutiveMissingCount: persisted.consecutiveMissingCount, restoredUrlCount: persisted.restoredCount,
+      },
+      errorSummary: null,
+    });
+    db.prepare('UPDATE crawl_runs SET run_mode = ?, site_selection = ? WHERE run_id = ?').run('selected', JSON.stringify([siteId]), 'r4');
+    await classifyRun(db, { runId: 'r4', fetchPagesFn: mixedFetch });
+
+    const runId = 'r4';
+    const fixedNow = () => '2026-07-13T04:00:00.000Z';
+    const dbSnapshotBefore = JSON.stringify(db.prepare('SELECT * FROM crawl_runs WHERE run_id = ?').get(runId));
+
+    const report = generateReport(db, { runId, outputDir: outDir, now: fixedNow });
+
+    // 导出前后数据库不变（report.js 全程只读）。
+    const dbSnapshotAfter = JSON.stringify(db.prepare('SELECT * FROM crawl_runs WHERE run_id = ?').get(runId));
+    assert.equal(dbSnapshotAfter, dbSnapshotBefore, '生成 AI 审查包前后数据库不应有任何变化');
+
+    // 三份新文件 + zip 都和其它报告文件落在同一个 run 目录。
+    for (const key of ['manifestJson', 'aiReviewJson', 'aiReviewTxt', 'aiReviewPackageZip']) {
+      assert.equal(join(report.dir, basename(report.files[key])), report.files[key], `${key} 必须落在 run 目录`);
+      assert.ok(existsSync(report.files[key]), `${key} 必须落盘`);
+    }
+
+    // ZIP 最终必须正好是 12 个文件。
+    const zipEntries = readZipEntries(readFileSync(report.files.aiReviewPackageZip));
+    const zipNames = zipEntries.map((e) => e.name).sort();
+    assert.deepEqual(zipNames, AI_REVIEW_PACKAGE_FILES, 'zip 必须正好包含 12 个文件，不能多也不能少');
+
+    // manifest.json：可解析，includedFiles 与 zip 实际清单一致，计数与 DB 一致，不含敏感/绝对路径信息。
+    const manifest = JSON.parse(readFileSync(report.files.manifestJson, 'utf-8'));
+    assert.equal(manifest.schemaVersion, '1.0');
+    assert.equal(manifest.run.runId, runId);
+    assert.equal(manifest.run.mode, 'selected');
+    assert.deepEqual(manifest.run.selectedSiteIds, [siteId]);
+    assert.deepEqual([...manifest.includedFiles].sort(), zipNames, 'manifest.includedFiles 必须和 zip 实际清单一致');
+    assert.deepEqual(manifest.summary, {
+      totalSites: 1, success: 1, partial: 0, failed: 0,
+      added: 1, missing: 1, consecutiveMissing: 1, restored: 1,
+      game: 1, nonGame: 0, unknown: 0,
+    }, 'manifest.summary 必须和数据库算出来的统计一致');
+    assert.ok(manifest.warnings.some((w) => w.includes('missing') && w.includes('永久删除')));
+    assert.ok(manifest.warnings.some((w) => w.includes('consecutive_missing') && w.includes('永久删除')));
+    assert.ok(manifest.warnings.some((w) => w.includes('restored') && w.includes('新增')));
+    assert.ok(manifest.warnings.some((w) => w.includes('baseline') && w.includes('新增')));
+    assert.ok(manifest.warnings.some((w) => w.includes('partial') && w.includes('failed')));
+    const manifestText = JSON.stringify(manifest);
+    assert.doesNotMatch(manifestText, new RegExp(outDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), '不得包含本地绝对路径');
+    assert.doesNotMatch(manifestText, /\.db["'/]|local\.db/i, '不得包含数据库路径');
+    assert.doesNotMatch(manifestText, /token|api[_-]?key|secret/i, '不得包含 CSRF token / API Key 等敏感字段');
+
+    // ai-review.json：可解析，四种 changeType 合法，each 字段只用现有数据，restored 不得混进 added。
+    const aiReview = JSON.parse(readFileSync(report.files.aiReviewJson, 'utf-8'));
+    assert.equal(aiReview.schemaVersion, '1.0');
+    assert.ok(Array.isArray(aiReview.instructions) && aiReview.instructions.length > 0);
+    assert.deepEqual(aiReview.summary, manifest.summary, 'ai-review.json 的 summary 必须和 manifest 一致');
+    const VALID_TYPES = new Set(['added', 'missing', 'consecutive_missing', 'restored']);
+    assert.ok(aiReview.items.every((i) => VALID_TYPES.has(i.changeType)), '每一项 changeType 必须是四种合法值之一');
+    const byType = Object.fromEntries([...VALID_TYPES].map((t) => [t, aiReview.items.filter((i) => i.changeType === t)]));
+    assert.equal(byType.added.length, 1);
+    assert.equal(byType.added[0].url, F);
+    assert.equal(byType.added[0].pageType, 'game', '新增的 F（含 hero）应该被分类为 game');
+    assert.equal(byType.missing.length, 1);
+    assert.equal(byType.missing[0].url, C);
+    assert.equal(byType.missing[0].pageType, null, 'missing 条目不经过分类器，必须是 null 而不是编造值');
+    assert.equal(byType.consecutive_missing.length, 1);
+    assert.equal(byType.consecutive_missing[0].url, G);
+    assert.equal(byType.restored.length, 1);
+    assert.equal(byType.restored[0].url, D);
+    assert.equal(byType.restored[0].changeType, 'restored', 'restored 不得被重新标记为 added');
+
+    // ai-review.txt：包含任务说明、七个分区、必要警告，不含完整 HTML/调试日志。
+    const txt = readFileSync(report.files.aiReviewTxt, 'utf-8');
+    assert.ok(txt.startsWith('Sitemap变化AI审查任务'));
+    assert.match(txt, /新的游戏页面/);
+    assert.match(txt, /永久删除/);
+    assert.match(txt, /## 1\. 运行摘要/);
+    assert.match(txt, /## 2\. 新增URL/);
+    assert.match(txt, /## 3\. 未知URL/);
+    assert.match(txt, /## 4\. 本轮缺失/);
+    assert.match(txt, /## 5\. 连续两轮缺失/);
+    assert.match(txt, /## 6\. 恢复URL/);
+    assert.match(txt, /## 7\. partial\/failed站点/);
+    assert.match(txt, new RegExp(F.replace('.', '\\.')), '新增URL分区应该出现 F');
+    assert.doesNotMatch(txt, /<html/i, '不得包含完整 HTML');
+
+    // 重复生成（幂等）：原子改名后不应该留下任何 .tmp 临时文件，且三份新文件与 zip 内容都保持一致。
+    // 用固定的 now 时钟，避免 manifest.generatedAt 因为两次真实调用间隔几毫秒而产生假性不一致。
+    const second = generateReport(db, { runId, outputDir: outDir, now: fixedNow });
     const dirFiles = readdirSync(second.dir);
     assert.ok(dirFiles.every((f) => !f.includes('.tmp-')), `重复生成后不应残留临时文件: ${dirFiles.join(', ')}`);
-
-    const zipBuf2 = readFileSync(second.files.aiReviewPackageZip);
-    const entries2 = readZipEntries(zipBuf2);
-    const byName1 = Object.fromEntries(entries1.map((e) => [e.name, e.data.toString('utf-8')]));
-    const byName2 = Object.fromEntries(entries2.map((e) => [e.name, e.data.toString('utf-8')]));
+    assert.equal(readFileSync(second.files.manifestJson, 'utf-8'), readFileSync(report.files.manifestJson, 'utf-8'));
+    assert.equal(readFileSync(second.files.aiReviewJson, 'utf-8'), readFileSync(report.files.aiReviewJson, 'utf-8'));
+    assert.equal(readFileSync(second.files.aiReviewTxt, 'utf-8'), readFileSync(report.files.aiReviewTxt, 'utf-8'));
+    const zipEntries2 = readZipEntries(readFileSync(second.files.aiReviewPackageZip));
+    const byName1 = Object.fromEntries(zipEntries.map((e) => [e.name, e.data.toString('utf-8')]));
+    const byName2 = Object.fromEntries(zipEntries2.map((e) => [e.name, e.data.toString('utf-8')]));
     assert.deepEqual(byName2, byName1, '重复生成后 zip 内每个文件的内容必须和上一次完全一致');
-
-    // report.md 本身也打包进了 zip，且和磁盘上单独的 report.md 内容一致。
-    const reportMdOnDisk = readFileSync(second.files.reportMd, 'utf-8');
-    assert.equal(byName2['report.md'], reportMdOnDisk);
   });
 });
 

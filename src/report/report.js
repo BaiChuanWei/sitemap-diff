@@ -3,13 +3,23 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { toCsv } from './csv.js';
 import { createZipBuffer } from './zip.js';
+import { buildAiReviewItems, buildManifest, buildAiReviewJson, buildAiReviewTxt } from './ai-review.js';
+
+const INCLUDED_FILES = [
+  'manifest.json', 'ai-review.json', 'ai-review.txt', 'report.md',
+  'new-urls.csv', 'new-urls.json', 'new-games.csv', 'unknown-urls.csv',
+  'missing-urls.csv', 'consecutive-missing-urls.csv', 'restored-urls.csv', 'changes.json',
+];
 
 /**
  * 为某次运行生成本地报告到 output/YYYY-MM-DD/<run_id>/：
- *   new-urls.csv / new-urls.json / new-games.csv / unknown-urls.csv / report.md
+ *   manifest.json / ai-review.json / ai-review.txt / report.md /
+ *   new-urls.csv / new-urls.json / new-games.csv / unknown-urls.csv /
+ *   missing-urls.csv / consecutive-missing-urls.csv / restored-urls.csv /
+ *   changes.json / ai-review-package.zip（以上 12 个文件打包）
  *
  * 只读 SQLite（crawl_runs / site_crawl_runs / url_classifications / added_urls /
- * sites），不做任何写库；因此报告生成失败绝不会破坏历史数据。
+ * url_changes / sites），不做任何写库；因此报告生成失败绝不会破坏历史数据。
  * 幂等：同一 run 重复生成 → 同一目录、相同内容；不同 run → 不同 <run_id> 子目录，
  * 不会无提示覆盖别的 run 的报告。
  *
@@ -75,6 +85,9 @@ export function generateReport(db, { runId, outputDir, now } = {}) {
   const CHANGE_CSV_HEADERS = ['detected_at', 'run_id', 'site_id', 'domain', 'original_url', 'normalized_url'];
 
   const files = {
+    manifestJson: join(dir, 'manifest.json'),
+    aiReviewJson: join(dir, 'ai-review.json'),
+    aiReviewTxt: join(dir, 'ai-review.txt'),
     newUrlsCsv: join(dir, 'new-urls.csv'),
     newUrlsJson: join(dir, 'new-urls.json'),
     newGamesCsv: join(dir, 'new-games.csv'),
@@ -139,6 +152,41 @@ export function generateReport(db, { runId, outputDir, now } = {}) {
     restoredTotal: restoredRows.length,
   };
 
+  // Dashboard M5：AI 审查包的三份核心文件——只读取上面已经算好的数据，
+  // 不重新访问网络、不重新分类、不编造字段（没有的数据一律 null）。
+  const generatedAt = now ? now() : new Date().toISOString();
+  const runInfo = {
+    startedAt: stats.startedAt,
+    finishedAt: stats.finishedAt,
+    mode: run?.run_mode ?? null,
+    selectedSiteIds: run?.site_selection ? safeParse(run.site_selection) : [],
+  };
+  const summary = {
+    totalSites: stats.sitesTotal,
+    success: stats.sitesSuccess,
+    partial: stats.sitesPartial,
+    failed: stats.sitesFailed,
+    added: stats.addedTotal,
+    missing: stats.missingTotal,
+    consecutiveMissing: stats.consecutiveMissingTotal,
+    restored: stats.restoredTotal,
+    game: games.length,
+    nonGame: nonGames.length,
+    unknown: unknowns.length,
+  };
+  const items = buildAiReviewItems({ addedRows: jsonRows, changeRows });
+
+  const manifestText = JSON.stringify(
+    buildManifest({ runId, generatedAt, runInfo, summary, includedFiles: INCLUDED_FILES }),
+    null,
+    2,
+  );
+  const aiReviewJsonText = JSON.stringify(buildAiReviewJson({ runId, runInfo, summary, items }), null, 2);
+  const aiReviewTxtText = buildAiReviewTxt({ runId, runInfo, summary, items, siteRuns });
+  writeFileSync(files.manifestJson, manifestText, 'utf-8');
+  writeFileSync(files.aiReviewJson, aiReviewJsonText, 'utf-8');
+  writeFileSync(files.aiReviewTxt, aiReviewTxtText, 'utf-8');
+
   const reportMdText = buildMarkdown(stats, siteRuns, files, dir);
   writeFileSync(files.reportMd, reportMdText, 'utf-8');
 
@@ -147,20 +195,31 @@ export function generateReport(db, { runId, outputDir, now } = {}) {
   // 目录下（不是临时浏览器下载文件）。先写临时文件、再原子改名——避免
   // 任何读者在写入过程中读到一个不完整的 zip；同一个 run 重复生成报告
   // （本函数整体是幂等的）时，原子改名会安全覆盖旧 zip，不会有中间态。
-  const zipBuffer = createZipBuffer(
-    [
-      { name: 'new-urls.csv', data: newUrlsCsvText },
-      { name: 'new-urls.json', data: newUrlsJsonText },
-      { name: 'new-games.csv', data: newGamesCsvText },
-      { name: 'unknown-urls.csv', data: unknownUrlsCsvText },
-      { name: 'missing-urls.csv', data: missingUrlsCsvText },
-      { name: 'consecutive-missing-urls.csv', data: consecutiveMissingUrlsCsvText },
-      { name: 'restored-urls.csv', data: restoredUrlsCsvText },
-      { name: 'changes.json', data: changesJsonText },
-      { name: 'report.md', data: reportMdText },
-    ],
-    { now: now ? new Date(now()) : new Date() },
-  );
+  //
+  // zipEntries 严格从 INCLUDED_FILES 这同一份清单构造（而不是手写第二遍
+  // 文件名列表）——manifest.json 里的 includedFiles 和 zip 实际内容永远
+  // 保证一致，不会因为漏改一处而悄悄产生分歧。
+  const fileContentsByName = {
+    'manifest.json': manifestText,
+    'ai-review.json': aiReviewJsonText,
+    'ai-review.txt': aiReviewTxtText,
+    'report.md': reportMdText,
+    'new-urls.csv': newUrlsCsvText,
+    'new-urls.json': newUrlsJsonText,
+    'new-games.csv': newGamesCsvText,
+    'unknown-urls.csv': unknownUrlsCsvText,
+    'missing-urls.csv': missingUrlsCsvText,
+    'consecutive-missing-urls.csv': consecutiveMissingUrlsCsvText,
+    'restored-urls.csv': restoredUrlsCsvText,
+    'changes.json': changesJsonText,
+  };
+  const zipEntries = INCLUDED_FILES.map((name) => {
+    if (!(name in fileContentsByName)) {
+      throw new Error(`AI 审查包内部错误：INCLUDED_FILES 列出了 ${name}，但没有对应内容`);
+    }
+    return { name, data: fileContentsByName[name] };
+  });
+  const zipBuffer = createZipBuffer(zipEntries, { now: now ? new Date(now()) : new Date() });
   const tmpZipPath = join(dir, `.ai-review-package.zip.tmp-${randomUUID()}`);
   writeFileSync(tmpZipPath, zipBuffer);
   renameSync(tmpZipPath, files.aiReviewPackageZip);
@@ -231,6 +290,9 @@ ${perSite || '| （无站点级记录） | | | | | |'}
 
 ## 输出文件
 
+- \`${files.manifestJson}\`（AI 审查包元数据：运行信息 / 统计 / 文件清单 / 警告）
+- \`${files.aiReviewJson}\`（AI 审查包结构化数据：合并新增/缺失/连续两轮缺失/恢复四类条目）
+- \`${files.aiReviewTxt}\`（AI 审查包纯文本任务说明，可直接粘贴给 ChatGPT/Claude/Gemini）
 - \`${files.newUrlsCsv}\`
 - \`${files.newUrlsJson}\`
 - \`${files.newGamesCsv}\`
@@ -240,7 +302,7 @@ ${perSite || '| （无站点级记录） | | | | | |'}
 - \`${files.restoredUrlsCsv}\`
 - \`${files.changesJson}\`
 - \`${files.reportMd}\`
-- \`${files.aiReviewPackageZip}\`（AI 审查包：以上报告文件打包的 zip，不含数据库/配置/日志）
+- \`${files.aiReviewPackageZip}\`（AI 审查包：以上 12 个文件打包的 zip，不含数据库/配置/日志，本工具不调用任何 AI API）
 
 > 目录：\`${dir}\`
 `;

@@ -9,7 +9,7 @@ const MAX_PAGE_SIZE = 200;
 const REPORT_FILE_BASENAMES = new Set([
   'new-urls.csv', 'new-urls.json', 'new-games.csv', 'unknown-urls.csv', 'report.md',
   'missing-urls.csv', 'consecutive-missing-urls.csv', 'restored-urls.csv', 'changes.json',
-  'ai-review-package.zip',
+  'ai-review-package.zip', 'manifest.json', 'ai-review.json', 'ai-review.txt',
 ]);
 const CHANGE_TYPES = new Set(['added', 'missing', 'consecutive_missing', 'restored']);
 const CONTENT_TYPES = {
@@ -17,6 +17,7 @@ const CONTENT_TYPES = {
   '.json': 'application/json; charset=utf-8',
   '.md': 'text/markdown; charset=utf-8',
   '.zip': 'application/zip',
+  '.txt': 'text/plain; charset=utf-8',
 };
 
 /** GET /api/runs/active */
